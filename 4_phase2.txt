@@ -1,0 +1,1549 @@
+
+
+#### INSY 437 - Queries for LockedIn #### 
+# Kaibo Zhang: 261110409
+# Malo Thomassin: 260952200
+# George Gueorguiev: 261052000
+# Sofia Karim: 260945464
+# Aissatou Fanny: 261009120
+
+
+# (DML CODE TO BE FOUND UNDER THE QUERIES) 
+
+####### QUERIES: ###########
+
+# Queries are organised according to the following categories: 
+	# For the candidate (profile) perspective 
+	# For the company (profile) perspective 
+	# For LockedIn’s (business) perspective 
+
+### CANDIDATE: 
+
+## Q1: Jane Smith is looking to upscale her career. She has just taken a course specialising in a niche domain: “Sales for AI”. Check whether this skill exists in the existing user_skill table. If it does not yet exist in the LockedIn database, update the skill table with this new skill. Update Jane Smith’s skill set in the user_skill table using her user_id.
+
+# Updating the skill table: 
+INSERT IGNORE INTO skill (skill_name) 
+VALUES ('Sales for AI');
+# Find the skill ID
+SET @newSkillId = (SELECT skill_id FROM skill WHERE skill_name = 'Sales for AI');
+# Find Jane's user_id 
+SET @JaneUserId = (SELECT user_id FROM userprofile WHERE fname = 'Jane' AND lname = 'Smith');
+# Update the user_skill table: 
+INSERT IGNORE INTO user_skill (user_id, skill_id) 
+VALUES (@JaneUserId,@newSkillId);
+
+# Display Jane’s skills 
+SELECT CONCAT(u.fname, ' ', u.lname) AS user_name, s.skill_name
+FROM user_skill us
+JOIN skill s ON us.skill_id = s.skill_id
+JOIN userprofile u ON us.user_id = u.user_id
+WHERE u.fname = 'Jane' AND u.lname = 'Smith';
+
+## Q2: John Doe has forgotten which jobs they have applied to. Return all active applications belonging to John Doe in the user_apply table. In the job table, if John has not yet applied to any active “Data Scientist” roles in the role_type column, John will apply to this role. Update the user_apply table accordingly.
+
+# Checking which jobs John Doe has applied to: 
+SELECT CONCAT(u.fname, ' ', u.lname) AS user_name, j.role_type AS job_application
+FROM user_apply ua
+JOIN userprofile u ON ua.user_id = u.user_id
+JOIN job j ON ua.job_id = j.job_id
+WHERE u.fname = 'John' AND u.lname = 'Doe';
+
+INSERT IGNORE INTO user_apply (user_id, job_id, application_time)
+SELECT
+    (SELECT user_id FROM userprofile WHERE fname = 'John' AND lname = 'Doe'),
+    j.job_id,
+    NOW()
+FROM
+    job j
+LEFT JOIN
+    user_apply ua ON j.job_id = ua.job_id
+    AND ua.user_id = (SELECT user_id FROM userprofile WHERE fname = 'John' AND lname = 'Doe')
+WHERE
+    j.role_type = 'Data Scientist'
+    AND ua.job_id IS NULL;
+
+SELECT CONCAT(u.fname, ' ', u.lname) AS user_name, j.role_type AS job_application
+FROM user_apply ua
+JOIN userprofile u ON ua.user_id = u.user_id
+JOIN job j ON ua.job_id = j.job_id
+WHERE u.fname = 'John' AND u.lname = 'Doe';
+
+## Q3: Alice wanted to check her account's popularity trend. She was wondering whether on a specific date or during what period was her account being noticed by more people. 
+
+# user network heated check
+SELECT COALESCE(v.day, c.day) AS day,
+       COALESCE(v.view_cnt, 0) AS view_cnt,
+       COALESCE(c.sender_cnt, 0) AS sender_cnt
+FROM
+(
+    (SELECT DATE(time) AS day, COUNT(DISTINCT viewer) AS view_cnt
+     FROM `view`
+     WHERE viewed = 'user3'
+     GROUP BY DATE(time)) AS v
+    LEFT JOIN
+    (SELECT DATE(request_time) AS day, COUNT(DISTINCT sender) AS sender_cnt
+     FROM connection
+     WHERE receiver = 'user3'
+     GROUP BY DATE(request_time)) AS c ON v.day = c.day
+)
+UNION
+SELECT COALESCE(v.day, c.day) AS day,
+       COALESCE(v.view_cnt, 0) AS view_cnt,
+       COALESCE(c.sender_cnt, 0) AS sender_cnt
+FROM
+(
+    (SELECT DATE(time) AS day, COUNT(DISTINCT viewer) AS view_cnt
+     FROM `view`
+     WHERE viewed = 'user3'
+     GROUP BY DATE(time)) AS v
+    RIGHT JOIN
+    (SELECT DATE(request_time) AS day, COUNT(DISTINCT sender) AS sender_cnt
+     FROM connection
+     WHERE receiver = 'user3'
+     GROUP BY DATE(request_time)) AS c ON v.day = c.day
+)
+ORDER BY day;
+
+## Q4: When Users on LockedIn want to search for other users' profile pages, they should be able to see all the relevant information about their name, contact information, educational backgrounds, etc. However, they should not be able to access some security information about this person, like his or her password. To address this need, a view that contains all the relevant information is created.
+
+# create view for profile looking
+CREATE VIEW profileDisplay AS
+SELECT a.user_id, a.name, a.headline, a.location, a.about, a.email, a.phone, a.website, b.school_name, b.degree, b.field_of_study, b.gpa, b.start_date, b.end_date, b.is_current, c.num_followers
+FROM
+    (
+        SELECT up.user_id, CONCAT(up.fname, ' ', up.lname) AS name, up.headline, up.location, up.about, ca.email, ca.phone, ca.website
+        FROM userprofile up
+        LEFT JOIN contactinfo ca ON up.contact_info_id = ca.contact_info_id
+    ) AS a
+LEFT JOIN
+    (
+        SELECT e.user_id, s.school_name, e.degree, e.field_of_study, e.gpa, e.start_date, e.end_date, e.is_current
+        FROM education e
+        JOIN school s ON e.school_id = s.school_id
+    ) AS b ON a.user_id = b.user_id
+LEFT JOIN
+    (
+        SELECT following, COUNT(*) AS num_followers
+        FROM follow
+        GROUP BY following
+    ) AS c ON a.user_id = c.following;
+
+
+## Q5: Our social platform offers recommendation services that automatically connect users with similar attributes to improve their interactions and experiences. For instance, they may live in the same city, have been in the same company or school, or even have mutual connections they share. The following query is an example of our service for user John.
+
+select user_id, 'same company' as category
+from experience
+where user_id not in (select followers from follow where following='user1')
+and user_id != 'user1'
+and company_id = (select company_id from experience where user_id = 'user1')
+union
+select user_id, 'same location' as category
+from profileDisplay
+where user_id not in (select followers from follow where following='user1')
+and user_id != 'user1'
+and location = (select location from profileDisplay where user_id = 'user1')
+union
+select distinct user_id, 'same school' as category
+from profileDisplay
+where user_id not in (select followers from follow where following='user1')
+and user_id != 'user1'
+and school_name = (select school_name from profileDisplay where user_id = 'user1')
+union
+select distinct following,'mutual connection' as category
+from follow
+where following not in (select followers from follow where following='user1')
+and following != 'user1'
+and followers in (select followers from follow where following='user1');
+
+
+## Q6: Recommends jobs to a specific user based on that person's skills and past experience (matches their skills and experience, with the skills necessary in job_skill and outputs relevant jobs)
+
+SELECT j.job_id, j.about, c.company_name
+FROM job j
+JOIN company c ON j.company_id = c.company_id
+WHERE j.job_id IN (
+  SELECT job_id
+  FROM job_skill
+  WHERE skill_id IN (
+    SELECT skill_id
+    FROM user_skill
+    WHERE user_id = 'user1'
+  )
+  UNION
+  SELECT job_id
+  FROM job_skill
+  WHERE skill_id IN (
+    SELECT skill_id
+    FROM experience_skill
+    WHERE experience_id IN (
+      SELECT experience_id
+      FROM experience
+      WHERE user_id = 'user1'
+    )
+  )
+)
+ORDER BY j.post_date DESC
+LIMIT 10;
+
+## Q7: Users wish to see which companies are best in terms of long-term retention of employees — a proxy used to establish which companies have the most stable jobs. This is useful for users to know before applying to companies to estimate job-security. 
+
+SELECT company_name, AVG(TIMESTAMPDIFF(MONTH, start_date, IFNULL(end_date, CURDATE()))) AS average_duration
+FROM experience
+JOIN company ON experience.company_id = company.company_id
+GROUP BY company.company_id
+ORDER BY average_duration DESC
+LIMIT 5;
+
+
+## Q8: Discover the top five skills that are most endorsed within your network. This query counts the frequency of each skill among your followers, helping you identify which skills are highly valued by professionals in your circle. For example, if you're considering a career shift or seeking to enhance your expertise, knowing which skills are in demand among your network can guide your professional development strategy effectively.
+
+SELECT skill.skill_name, COUNT(*) as endorsement_count
+FROM user_skill
+JOIN userprofile ON user_skill.user_id = userprofile.user_id
+JOIN follow ON userprofile.user_id = follow.followers
+JOIN skill ON user_skill.skill_id = skill.skill_id
+WHERE follow.following = 'user3'
+GROUP BY skill.skill_name
+ORDER BY endorsement_count DESC
+LIMIT 5;
+
+
+## Q9: Find colleagues who have worked at the same company as you. This query helps you identify individuals who share similar professional experiences and backgrounds, fostering potential connections or collaborations. For instance, if you're relocating to a new city or seeking career advice, connecting with former colleagues from the same company can provide valuable insights and support.
+
+SELECT DISTINCT e1.user_id, e2.user_id AS colleague_id
+FROM experience e1
+JOIN experience e2 ON e1.company_id = e2.company_id AND e1.user_id != e2.user_id
+WHERE e1.company_id = 'C2';
+
+
+## Q10: Identify potential mentors who excel in a specific skill and have substantial experience in their field. This query allows you to pinpoint professionals who possess expertise in a skill you're interested in developing further. Whether you're a recent graduate navigating your career path or seeking guidance on a particular industry trend, connecting with experienced mentors can offer invaluable mentorship and career advice to help you progress in your chosen field.
+
+SELECT up.user_id, up.fname, up.lname, up.headline, COUNT(us.skill_id) AS endorsement_count, MIN(ex.start_date) AS experience_since
+FROM userprofile up
+JOIN user_skill us ON up.user_id = us.user_id
+JOIN experience ex ON up.user_id = ex.user_id
+WHERE us.skill_id = '2'
+GROUP BY up.user_id
+HAVING MIN(ex.start_date) <= (NOW() - INTERVAL 5 YEAR)
+ORDER BY endorsement_count DESC, experience_since ASC
+LIMIT 5;
+
+
+## Q11: This query is designed to reveal the most sought-after skills in the job market over the past year. By examining job listings and identifying the frequency of skill requirements, you can understand which skills employers value most. This analysis is pivotal for professionals aiming to enhance their employability by acquiring or polishing skills in high demand. Whether you're planning a career shift or seeking to stay competitive in your field, knowing these top skills provides a clear direction for your personal development efforts.
+
+SELECT skill.skill_name, COUNT(*) AS frequency 
+FROM job_skill 
+INNER JOIN skill ON job_skill.skill_id = skill.skill_id 
+INNER JOIN job ON job_skill.job_id = job.job_id 
+WHERE job.post_date >= CURDATE() - INTERVAL 1 YEAR 
+GROUP BY skill.skill_name 
+ORDER BY frequency DESC 
+LIMIT 5;
+
+
+### COMPANY PROFILE 
+
+## Q12: This query aims to identify individuals who may be primed for a new professional challenge, focusing on those whose most recent job experience ended at least three years ago. By examining the user profiles and their work history, the query isolates profiles based on the end date of their last job. This can serve as a useful tool for recruiters and career advisors looking to target candidates who are likely in a transition phase and might be open to exploring new job opportunities. It also offers insights for professionals themselves, who can gauge the typical duration between roles among their peers.
+
+SELECT userprofile.user_id, userprofile.fname, userprofile.lname, MAX(experience.end_date) as last_job_end_date 
+FROM userprofile 
+JOIN experience ON userprofile.user_id = experience.user_id 
+WHERE experience.end_date IS NOT NULL 
+GROUP BY userprofile.user_id 
+HAVING MAX(experience.end_date) <= NOW() - INTERVAL 3 YEAR 
+ORDER BY last_job_end_date;
+
+
+## Q13: a company is recruiting for all skills “Backend Development”, “Frontend Development”, “GIT”, “Date Engineering” and “SQL”. The company is headquartered in the west coast, so will exclude from its consideration any east coast candidates or any currently active professionals. Which candidates could the company reach out to? 
+
+SELECT DISTINCT CONCAT(u.fname, ' ', u.lname) AS user_name, u.location
+FROM user_skill us
+JOIN userprofile u ON us.user_id = u.user_id
+JOIN skill s ON us.skill_id = s.skill_id
+JOIN experience e ON u.user_id = e.user_id
+WHERE s.skill_name IN ('Backend Development', 'Frontend Development', 'GIT', 'Data Engineering', 'SQL')
+AND u.location NOT IN ('New York', 'Boston')
+AND e.end_date IS NOT NULL;
+
+
+## Q14: SunPower Energy is hiring for a Cloud Computing Specialist. The company's HR department has registered on LockedIn and wants to check if there are any users on the platform who could be a good fit for this position. As the company values the extent to which a candidate’s skill set matches with the job posting and their educational background, the following table is extracted. The fit-level is a percentage data value that represents the number of skills a person possesses that are also listed in the job posting. 
+
+SQL script: 
+SELECT a.user_id, a.fit_level, b.gpa, b.school_name, b.location
+FROM
+    (
+        SELECT user_id, 
+               COUNT(*) / (SELECT COUNT(*) 
+                           FROM job_skill 
+                           WHERE job_id = 4) AS fit_level
+        FROM user_skill
+        WHERE skill_id IN 
+              (SELECT skill_id 
+               FROM job_skill 
+               WHERE job_id = 8)
+        GROUP BY user_id
+        ORDER BY fit_level DESC
+    ) a 
+JOIN 
+    (
+        SELECT e.user_id, e.gpa, s.school_name, s.location
+        FROM education e
+        JOIN school s ON e.school_id = s.school_id
+    ) b ON a.user_id = b.user_id;
+
+
+
+## Q15: Return job positions which were posted after 2024-01-2025 and include either “Marketing” or “Sales” in the role_type 
+SELECT *
+FROM job
+WHERE post_date > '2024-01-25'
+AND (role_type LIKE '%Marketing%' OR role_type LIKE '%Sales%');
+
+SELECT DISTINCT u.fname, u.lname
+FROM experience e
+JOIN userprofile u ON e.user_id = u.user_id
+JOIN (
+    SELECT DISTINCT role_type
+    FROM job
+    WHERE post_date > '2024-01-25'
+    AND (role_type LIKE '%Marketing%' OR role_type LIKE '%Sales%')
+) AS roles ON e.role_name = roles.role_type;
+
+
+### LOCKEDIN (Business perspective)
+
+## Q16: return comments for posts in which users express dissent, disapproval or did challenge what the original posts says; searching for punctuation such as “?” or terminology such as “disagree”, “different perspective”... Only return the comment and the associated name of the user who disagreed with the post. 
+
+SELECT c.content, CONCAT(u.fname, ' ', u.lname) AS user_name
+FROM comment c
+JOIN userprofile u ON c.user_id = u.user_id
+JOIN post p ON c.post_id = p.post_id
+WHERE LOWER(c.content) LIKE '%disagree%'
+   OR LOWER(c.content) LIKE '%different perspective%'
+   OR LOWER(c.content) LIKE '%challenge%'
+   OR LOWER(c.content) LIKE '%not agree%'
+   OR LOWER(c.content) LIKE '%not sure%'
+   OR LOWER(c.content) LIKE '%uncertain%'
+   OR LOWER(c.content) LIKE '%question%'
+   OR LOWER(c.content) LIKE '%?%'
+   OR LOWER(c.content) LIKE '%?!%'
+   OR LOWER(c.content) LIKE '%!?%'
+   OR LOWER(c.content) LIKE '%no way%'
+   OR LOWER(c.content) LIKE '%impossible%'
+   OR LOWER(c.content) LIKE '%incorrect%'
+   OR LOWER(c.content) LIKE '%false%'
+   OR LOWER(c.content) LIKE '%not necessarily%'
+   OR LOWER(c.content) LIKE '%objection%'
+   OR LOWER(c.content) LIKE '%oppose%'
+   OR LOWER(c.content) LIKE '%disapprove%'
+   OR LOWER(c.content) LIKE '%objectionable%'
+   OR LOWER(c.content) LIKE '%inaccurate%'
+   OR LOWER(c.content) LIKE '%wrong%'
+   OR LOWER(c.content) LIKE '%not true%'
+   OR LOWER(c.content) LIKE '%not correct%'
+   OR LOWER(c.content) LIKE '%misleading%'
+   OR LOWER(c.content) LIKE '%not accurate%'
+   OR LOWER(c.content) LIKE '%not precise%'
+   OR LOWER(c.content) LIKE '%not exact%'
+   OR LOWER(c.content) LIKE '%not factual%'
+   OR LOWER(c.content) LIKE '%untrue%'
+   OR LOWER(c.content) LIKE '%fallacy%'
+   OR LOWER(c.content) LIKE '%dissatisfaction%'
+   OR LOWER(c.content) LIKE '%objectionable%'
+   OR LOWER(c.content) LIKE '%inappropriate%'
+   OR LOWER(c.content) LIKE '%not acceptable%'
+   OR LOWER(c.content) LIKE '%not appropriate%'
+   OR LOWER(c.content) LIKE '%offensive%'
+   OR LOWER(c.content) LIKE '%displeasure%'
+   OR LOWER(c.content) LIKE '%unfavorable%'
+   OR LOWER(c.content) LIKE '%negative%'
+   OR LOWER(c.content) LIKE '%not supportive%'
+   OR LOWER(c.content) LIKE '%contradict%'
+   OR LOWER(c.content) LIKE '%contradiction%'
+   OR LOWER(c.content) LIKE '%challenge%'
+   OR LOWER(c.content) LIKE '%rebuke%'
+   OR LOWER(c.content) LIKE '%challenge%'
+   OR LOWER(c.content) LIKE '%oppose%'
+   OR LOWER(c.content) LIKE '%deny%'
+   OR LOWER(c.content) LIKE '%dispute%';
+
+
+## Q17: We’re interested in influencers on LockedIn for potential brand deals. To determine the most popular users, we will base ourselves on users with the most number of connections. We would like to see if a user’s popularity is linked to the number of posts they have also created. Rank users in terms of their number of connections (in descending order) while also linking their corresponding number of posts. Create a new column with the ratio of connections to the number of posts that a user has, to see if these two fields are linked. 
+
+SELECT 
+    u.fname AS first_name,
+    u.lname AS last_name,
+    combined_data.total_posts, 
+    combined_data.total_connections,
+    IF(combined_data.total_posts > 0, combined_data.total_connections / combined_data.total_posts, 0) AS connection_post_ratio
+FROM (
+    SELECT 
+        p.user_id, 
+        IFNULL(p.total_posts, 0) AS total_posts, 
+        IFNULL(c.total_connections, 0) AS total_connections
+    FROM (
+        SELECT user_id, COUNT(*) AS total_posts
+        FROM post
+        GROUP BY user_id
+    ) AS p
+    LEFT JOIN (
+        SELECT sender AS user_id, COUNT(*) AS total_connections
+        FROM connection
+        GROUP BY sender
+    ) AS c ON p.user_id = c.user_id
+    UNION
+    SELECT 
+        c.user_id, 
+        IFNULL(p.total_posts, 0) AS total_posts, 
+        IFNULL(c.total_connections, 0) AS total_connections
+    FROM (
+        SELECT sender AS user_id, COUNT(*) AS total_connections
+        FROM connection
+        GROUP BY sender
+    ) AS c
+    LEFT JOIN (
+        SELECT user_id, COUNT(*) AS total_posts
+        FROM post
+        GROUP BY user_id
+    ) AS p ON p.user_id = c.user_id
+) AS combined_data
+JOIN userprofile u ON combined_data.user_id = u.user_id
+ORDER BY total_connections DESC;
+
+
+## Q18: LockedIn is interested in studying the top active users on our platform and examining the various levels of reactions their posts received. To achieve this, we extracted a table that included columns for the number of reactions, total post counts, and total comments received.
+
+# num posts and reaction received
+SELECT a.user_id, like_count, love_count, celebrate_count, insightful_count, curious_count, num_comments,total_count
+FROM
+(SELECT p.user_id,
+       COUNT(CASE WHEN r.reaction_type = 'like' THEN 1 ELSE NULL END) AS like_count,
+       COUNT(CASE WHEN r.reaction_type = 'love' THEN 1 ELSE NULL END) AS love_count,
+       COUNT(CASE WHEN r.reaction_type = 'celebrate' THEN 1 ELSE NULL END) AS celebrate_count,
+       COUNT(CASE WHEN r.reaction_type = 'insightful' THEN 1 ELSE NULL END) AS insightful_count,
+       COUNT(CASE WHEN r.reaction_type = 'curious' THEN 1 ELSE NULL END) AS curious_count,
+       COUNT(*) AS total_count
+FROM (SELECT * FROM post) p
+LEFT JOIN (SELECT * FROM reaction) r ON p.post_id = r.post_id
+GROUP BY p.user_id) a 
+JOIN 
+(SELECT p.user_id, COUNT(*) as num_comments
+FROM (SELECT * FROM post) p
+LEFT JOIN (SELECT * FROM comment) c ON p.post_id = c.post_id
+GROUP BY p.user_id) b on a.user_id=b.user_id
+ORDER BY total_count DESC;
+
+
+## Q19: Helping LockedIn track from month to month how many new connections are formed on the platform. This can be useful to data analysts to make a regression model to see which factors influence the growth of the platform. 
+
+SELECT DATE_FORMAT(request_time, '%Y-%m') AS month, COUNT(*) AS total_new_connections
+FROM connection
+WHERE request_status = 'accepted'
+GROUP BY month
+ORDER BY month;
+
+
+## Q20: Evolution of new job listings on LockedIn: how is the platform performing in attracting companies that are hiring? 
+SELECT DATE_FORMAT(j.post_date, '%Y-%m') AS month, COUNT(j.job_id) AS job_listings
+FROM job j
+GROUP BY month
+ORDER BY month DESC;
+
+
+
+######## DML CODE ########## 
+
+
+# Create Contact Information Table to store User Information
+CREATE TABLE contactinfo (
+    contact_info_id INT,
+    email VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) NOT NULL,
+    website VARCHAR(255),
+    PRIMARY KEY (contact_info_id)
+);
+
+# Insert contact information data 
+INSERT INTO contactinfo (contact_info_id, email, phone, website) VALUES
+(1, 'john.doe@example.com', '123-456-7890', 'www.johndoe.com'),
+(2, 'jane.smith@example.com', '987-654-3210', 'www.janesmith.com'),
+(3, 'alice.johnson@example.com', '111-222-3333', 'www.alicejohnson.com'),
+(4, 'michael.brown@example.com', '444-555-6666', 'www.michaelbrown.com'),
+(5, 'emily.jones@example.com', '777-888-9999', NULL),
+(6, 'david.wilson@example.com', '222-333-4444', 'www.davidwilson.com'),
+(7, 'jessica.martinez@example.com', '555-666-7777', 'www.jessicamartinez.com'),
+(8, 'andrew.taylor@example.com', '999-000-1111', 'www.andrewtaylor.com'),
+(9, 'lauren.anderson@example.com', '888-999-0000', NULL),
+(10, 'ryan.thomas@example.com', '666-777-8888', 'www.ryanthomas.com'),
+(11, 'sarah.garcia@example.com', '333-444-5555', 'www.sarahgarcia.com'),
+(12, 'christopher.lopez@example.com', '111-222-3333', 'www.christopherlopez.com'),
+(13, 'megan.hernandez@example.com', '888-999-0000', NULL),
+(14, 'joshua.gonzalez@example.com', '444-555-6666', 'www.joshuagonzalez.com'),
+(15, 'samantha.perez@example.com', '555-666-7777', 'www.samanthaperez.com'),
+(16, 'robert.carter@example.com', '666-777-8888', 'www.robertcarter.com'),
+(17, 'kayla.scott@example.com', '777-888-9999', 'www.kaylascott.com'),
+(18, 'kevin.nguyen@example.com', '999-000-1111', 'www.kevinnguyen.com'),
+(19, 'rachel.robinson@example.com', '222-333-4444', 'www.rachelrobinson.com'),
+(20, 'brandon.hill@example.com', '111-222-3333', 'www.brandonhill.com'),
+(21, 'amanda.morales@example.com', '555-666-7777', 'www.amandamorales.com'),
+(22, 'daniel.flores@example.com', '888-999-0000', 'www.danielflores.com'),
+(23, 'rebecca.cooper@example.com', '444-555-6666', 'www.rebeccacooper.com'),
+(24, 'nicholas.rossi@example.com', '999-000-1111', 'www.nicholasrossi.com'),
+(25, 'michelle.bell@example.com', '222-333-4444', NULL),
+(26, 'matthew.wright@example.com', '777-888-9999', 'www.matthewwright.com'),
+(27, 'ashley.lee@example.com', '333-444-5555', 'www.ashleylee.com'),
+(28, 'justin.martinez@example.com', '888-999-0000', 'www.justinmartinez.com'),
+(29, 'stephanie.liu@example.com', '444-555-6666', 'www.stephanieliu.com'),
+(30, 'eric.gomez@example.com', '666-777-8888', NULL);
+
+# Create corresponding user profile (connected to contact_info) 
+CREATE TABLE userprofile (
+    user_id VARCHAR(12),
+    fname VARCHAR(50) NOT NULL,
+    lname VARCHAR(50) NOT NULL,
+    password VARCHAR(50) NOT NULL,
+    headline VARCHAR(255),
+    location VARCHAR(100) NOT NULL,
+    about TEXT,
+    contact_info_id INT,
+    PRIMARY KEY (user_id),
+    FOREIGN KEY (contact_info_id) REFERENCES contactinfo(contact_info_id) 
+  		ON DELETE CASCADE
+);
+
+# Insert data into userprofile 
+INSERT INTO userprofile (user_id, fname, lname, password, headline, location, about, contact_info_id) VALUES
+('user1', 'John', 'Doe', 'p@ssw0rd1', 'Software Engineer', 'New York', 'I am a passionate developer.', 1),
+('user2', 'Jane', 'Smith', 'pa$$w0rd2', 'Marketing Manager', 'Los Angeles', 'Experienced in digital marketing.', 2),
+('user3', 'Alice', 'Johnson', 'P@$$w0rd3', 'Data Scientist', 'Chicago', 'Analyzing big data sets.', 3),
+('user4', 'Michael', 'Brown', 'Pa$$w0rd4', 'Financial Analyst', 'Houston', 'Proficient in financial modeling.', 4),
+('user5', 'Emily', 'Davis', 'p@ssW0rd5', 'Teacher', 'Seattle', 'Passionate about education.', 5),
+('user6', 'Daniel', 'Wilson', 'P@ssw0rd6', 'Graphic Designer', 'San Francisco', 'Creating visually stunning designs.', 6),
+('user7', 'Sarah', 'Taylor', 'pa$$w0rd7', 'Registered Nurse', 'Boston', 'Caring for patients with compassion.', 7),
+('user8', 'Kevin', 'Martinez', 'P@$$w0rd8', 'Software Developer', 'Austin', 'Building innovative software solutions.', 8),
+('user9', 'Jennifer', 'Garcia', 'p@ssw0rd9', 'Project Manager', 'Miami', 'Leading teams to success.', 9),
+('user10', 'Matthew', 'Rodriguez', 'P@$$w0rd10', 'Sales Representative', 'Philadelphia', 'Exceeding sales targets consistently.', 10),
+('user11', 'Amanda', 'Anderson', 'pa$$w0rd11', 'HR Manager', 'Dallas', 'Managing human resources effectively.', 11),
+('user12', 'Christopher', 'Lopez', 'P@$$w0rd12', 'Web Developer', 'Denver', 'Creating responsive web applications.', 12),
+('user13', 'Megan', 'White', 'p@ssw0rd13', 'Digital Marketer', 'Portland', 'Implementing successful marketing campaigns.', 13),
+('user14', 'Brandon', 'Lee', 'P@$$w0rd14', 'UX Designer', 'San Diego', 'Enhancing user experience through design.', 14),
+('user15', 'Lauren', 'Clark', 'pa$$w0rd15', 'Accountant', 'Chicago', 'Managing financial records accurately.', 15),
+('user16', 'Ryan', 'Lewis', 'P@$$w0rd16', 'Data Analyst', 'Seattle', 'Analyzing data to drive business insights.', 16),
+('user17', 'Stephanie', 'Hill', 'p@ssw0rd17', 'Marketing Coordinator', 'Los Angeles', 'Supporting marketing initiatives.', 17),
+('user18', 'Nicholas', 'Green', 'P@$$w0rd18', 'Software Engineer', 'New York', 'Developing scalable software solutions.', 18),
+('user19', 'Jessica', 'Wright', 'pa$$w0rd19', 'Product Manager', 'San Francisco', 'Bringing new products to market.', 19),
+('user20', 'Jonathan', 'Scott', 'P@$$w0rd20', 'Financial Advisor', 'Houston', 'Providing financial advice to clients.', 20),
+('user21', 'Samantha', 'Perez', 'pa$$w0rd21', 'UX/UI Designer', 'Miami', 'Creating intuitive user interfaces.', 21),
+('user22', 'Andrew', 'King', 'P@$$w0rd22', 'Database Administrator', 'Dallas', 'Managing database systems efficiently.', 22),
+('user23', 'Rachel', 'Baker', 'p@ssw0rd23', 'Content Writer', 'Austin', 'Crafting compelling content.', 23),
+('user24', 'David', 'Young', 'P@$$w0rd24', 'Software Tester', 'San Diego', 'Ensuring software quality through testing.', 24),
+('user25', 'Brittany', 'Turner', 'pa$$w0rd25', 'HR Coordinator', 'Chicago', 'Supporting HR functions.', 25),
+('user26', 'Justin', 'Hernandez', 'P@$$w0rd26', 'Network Engineer', 'Los Angeles', 'Managing network infrastructure.', 26),
+('user27', 'Kelly', 'Nelson', 'p@ssw0rd27', 'Marketing Analyst', 'New York', 'Analyzing marketing data for insights.', 27),
+('user28', 'Tyler', 'Gonzalez', 'P@$$w0rd28', 'Frontend Developer', 'San Francisco', 'Building user-friendly interfaces.', 28),
+('user29', 'Alexis', 'Parker', 'pa$$w0rd29', 'Operations Manager', 'Dallas', 'Overseeing day-to-day operations.', 29),
+('user30', 'Jordan', 'Evans', 'P@$$w0rd30', 'Business Analyst', 'Chicago', 'Analyzing business processes for improvements.', 30);
+
+# Create followings table 
+CREATE TABLE follow (
+    following VARCHAR(12),
+    followers VARCHAR(12),
+    PRIMARY KEY (following, followers),
+    FOREIGN KEY (following) REFERENCES userprofile(user_id),
+    FOREIGN KEY (followers) REFERENCES userprofile(user_id)
+);
+
+# Insert data into users who follow each other 
+INSERT INTO follow (following, followers) VALUES
+('user1', 'user2'),
+('user1', 'user3'),
+('user1', 'user4'),
+('user2', 'user1'),
+('user2', 'user3'),
+('user2', 'user4'),
+('user2', 'user5'),
+('user2', 'user6'),
+('user3', 'user1'),
+('user3', 'user2'),
+('user3', 'user4'),
+('user3', 'user5'),
+('user3', 'user6'),
+('user4', 'user1'),
+('user4', 'user2'),
+('user4', 'user3'),
+('user4', 'user5'),
+('user4', 'user6'),
+('user5', 'user1'),
+('user5', 'user2'),
+('user5', 'user3'),
+('user5', 'user4'),
+('user5', 'user6'),
+('user6', 'user1'),
+('user6', 'user2'),
+('user6', 'user3'),
+('user6', 'user4'),
+('user6', 'user5'),
+('user23', 'user1'),
+('user23', 'user2'),
+('user23', 'user3'),
+('user23', 'user4'),
+('user23', 'user5'),
+('user23', 'user6'),
+('user7', 'user8'),
+('user7', 'user9'),
+('user7', 'user10'),
+('user8', 'user7'),
+('user8', 'user9'),
+('user8', 'user10'),
+('user8', 'user11'),
+('user8', 'user12'),
+('user9', 'user7'),
+('user9', 'user8'),
+('user9', 'user10'),
+('user9', 'user11'),
+('user9', 'user12'),
+('user10', 'user7'),
+('user10', 'user8'),
+('user10', 'user9'),
+('user10', 'user11'),
+('user10', 'user12'),
+('user11', 'user7'),
+('user11', 'user8'),
+('user11', 'user9'),
+('user11', 'user10'),
+('user11', 'user12'),
+('user12', 'user7'),
+('user12', 'user8'),
+('user12', 'user9'),
+('user12', 'user10'),
+('user12', 'user11'),
+('user24', 'user25'),
+('user24', 'user26'),
+('user24', 'user27'),
+('user25', 'user24'),
+('user25', 'user26'),
+('user25', 'user27'),
+('user25', 'user28');
+
+# Create personalized user view per profile 
+CREATE TABLE `view` (
+    viewer VARCHAR(12),
+    viewed VARCHAR(12),
+    time TIMESTAMP NOT NULL,
+    PRIMARY KEY (viewer, viewed),
+    FOREIGN KEY (viewer) REFERENCES userprofile(user_id),
+    FOREIGN KEY (viewed) REFERENCES userprofile(user_id)
+);
+
+# Insert date into view / profile 
+INSERT INTO `view` (viewer, viewed, time) VALUES
+('user1', 'user25', '2022-03-17 15:30:45'),
+('user1', 'user12', '2022-03-17 16:45:22'),
+('user1', 'user7', '2022-03-17 17:12:59'),
+('user2', 'user1', '2022-03-18 08:20:10'),
+('user2', 'user3', '2022-03-18 09:05:37'),
+('user2', 'user8', '2022-03-18 10:18:55'),
+('user2', 'user9', '2022-03-18 11:40:03'),
+('user2', 'user6', '2022-03-18 12:55:28'),
+('user3', 'user1', '2022-03-18 13:10:15'),
+('user3', 'user2', '2022-03-18 14:25:40'),
+('user3', 'user4', '2022-03-18 15:30:59'),
+('user3', 'user5', '2022-03-18 16:40:17'),
+('user3', 'user6', '2022-03-18 17:55:42'),
+('user4', 'user1', '2022-03-18 18:30:05'),
+('user4', 'user2', '2022-03-18 19:45:30'),
+('user4', 'user3', '2022-03-18 20:50:45'),
+('user4', 'user5', '2022-03-18 21:55:59'),
+('user4', 'user6', '2022-03-18 22:10:20'),
+('user5', 'user1', '2022-03-19 08:20:35'),
+('user5', 'user2', '2022-03-19 09:35:50'),
+('user5', 'user3', '2022-03-19 10:40:05'),
+('user5', 'user4', '2022-03-19 11:45:20'),
+('user5', 'user6', '2022-03-19 12:50:35'),
+('user6', 'user1', '2022-03-19 13:00:50'),
+('user6', 'user2', '2022-03-19 14:15:05'),
+('user6', 'user3', '2022-03-19 15:20:20'),
+('user6', 'user4', '2022-03-19 16:25:35'),
+('user6', 'user5', '2022-03-19 17:30:50'),
+('user23', 'user1', '2022-03-19 18:40:05'),
+('user23', 'user2', '2022-03-19 19:55:20'),
+('user23', 'user3', '2022-03-19 20:00:35'),
+('user23', 'user4', '2022-03-19 21:05:50'),
+('user23', 'user5', '2022-03-19 22:10:05'),
+('user23', 'user6', '2022-03-19 23:15:20'),
+('user26', 'user23', '2022-03-20 02:10:05'),
+('user25', 'user23', '2022-03-20 03:15:20'),
+('user24', 'user23', '2022-03-20 04:40:05'),
+('user23', 'user22', '2022-03-20 05:55:20'),
+('user22', 'user21', '2022-03-20 06:00:35'),
+('user21', 'user20', '2022-03-20 07:05:50'),
+('user20', 'user19', '2022-03-20 08:10:05'),
+('user19', 'user18', '2022-03-20 09:15:20'),
+('user18', 'user17', '2022-03-20 10:40:05'),
+('user17', 'user16', '2022-03-20 11:55:20'),
+('user16', 'user15', '2022-03-20 12:00:35'),
+('user15', 'user14', '2022-03-20 13:05:50'),
+('user14', 'user13', '2022-03-20 14:10:05'),
+('user13', 'user12', '2022-03-20 15:15:20'),
+('user7', 'user8', '2022-03-17 15:30:45'),
+('user7', 'user9', '2022-03-17 16:45:22'),
+('user8', 'user10', '2022-03-17 17:12:59'),
+('user9', 'user11', '2022-03-18 08:20:10'),
+('user10', 'user12', '2022-03-18 09:05:37'),
+('user11', 'user13', '2022-03-18 10:18:55'),
+('user12', 'user14', '2022-03-18 11:40:03'),
+('user13', 'user15', '2022-03-18 12:55:28'),
+('user14', 'user16', '2022-03-18 13:10:15'),
+('user15', 'user17', '2022-03-18 14:25:40'),
+('user16', 'user18', '2022-03-18 15:30:59'),
+('user20', 'user22', '2022-03-18 19:45:30'),
+('user21', 'user23', '2022-03-18 20:50:45'),
+('user22', 'user24', '2022-03-18 21:55:59'),
+('user23', 'user25', '2022-03-19 08:20:35'),
+('user24', 'user26', '2022-03-19 09:35:50'),
+('user25', 'user27', '2022-03-19 10:40:05'),
+('user26', 'user28', '2022-03-19 11:45:20'),
+('user27', 'user29', '2022-03-19 12:50:35'),
+('user28', 'user30', '2022-03-19 13:00:50'),
+('user29', 'user1', '2022-03-19 14:15:05'),
+('user30', 'user2', '2022-03-19 15:20:20');
+
+# Create table to count the number of connections per profile 
+CREATE TABLE connection (
+    connection_id INT,
+    request_status ENUM('pending','accepted','rejected'),
+    request_time TIMESTAMP NOT NULL,
+  	 sender VARCHAR(12),
+    receiver VARCHAR(12),
+    PRIMARY KEY (connection_id),
+    FOREIGN KEY (sender) REFERENCES userprofile(user_id),
+    FOREIGN KEY (receiver) REFERENCES userprofile(user_id)
+);
+
+# Insert data into the connections table 
+INSERT INTO connection (connection_id, request_status, request_time, sender, receiver) VALUES
+(1, 'accepted', '2022-03-17 15:30:45', 'user1', 'user2'),
+(2, 'accepted', '2022-03-17 16:45:22', 'user1', 'user3'),
+(3, 'accepted', '2022-03-17 17:12:59', 'user1', 'user4'),
+(4, 'accepted', '2022-03-17 18:30:45', 'user2', 'user1'),
+(5, 'accepted', '2022-03-17 19:45:22', 'user2', 'user3'),
+(6, 'accepted', '2022-03-17 20:10:15', 'user2', 'user4'),
+(7, 'accepted', '2022-03-17 21:20:30', 'user2', 'user5'),
+(8, 'accepted', '2022-03-17 22:35:15', 'user2', 'user6'),
+(9, 'accepted', '2022-03-17 23:40:22', 'user3', 'user1'),
+(10, 'accepted', '2022-03-17 23:55:45', 'user3', 'user2'),
+(11, 'accepted', '2022-03-18 00:10:30', 'user3', 'user4'),
+(12, 'accepted', '2022-03-18 01:25:15', 'user3', 'user5'),
+(13, 'accepted', '2022-03-18 02:30:22', 'user3', 'user6'),
+(14, 'accepted', '2022-03-18 03:45:45', 'user4', 'user1'),
+(15, 'accepted', '2022-03-18 04:50:30', 'user4', 'user2'),
+(16, 'accepted', '2022-03-18 05:05:15', 'user4', 'user3'),
+(17, 'accepted', '2022-03-18 06:20:22', 'user4', 'user5'),
+(18, 'accepted', '2022-03-18 07:35:45', 'user4', 'user6'),
+(19, 'accepted', '2022-03-18 08:40:30', 'user5', 'user1'),
+(20, 'accepted', '2022-03-18 09:55:15', 'user5', 'user2'),
+(21, 'accepted', '2022-03-18 10:10:22', 'user5', 'user3'),
+(22, 'accepted', '2022-03-18 11:25:45', 'user5', 'user4'),
+(23, 'accepted', '2022-03-18 12:30:30', 'user6', 'user1'),
+(24, 'accepted', '2022-03-18 13:45:15', 'user6', 'user2'),
+(25, 'accepted', '2022-03-18 14:50:22', 'user6', 'user3'),
+(26, 'accepted', '2022-03-18 15:05:45', 'user6', 'user4'),
+(27, 'accepted', '2022-03-18 16:20:30', 'user6', 'user5'),
+(28, 'accepted', '2022-03-18 17:35:15', 'user7', 'user8'),
+(29, 'accepted', '2022-03-18 18:40:22', 'user7', 'user9'),
+(30, 'accepted', '2022-03-18 19:55:45', 'user7', 'user10'),
+(31, 'accepted', '2022-03-18 20:10:30', 'user8', 'user7'),
+(32, 'accepted', '2022-03-18 21:25:15', 'user8', 'user9'),
+(33, 'accepted', '2022-03-18 22:30:22', 'user8', 'user10'),
+(34, 'accepted', '2022-03-18 23:45:45', 'user8', 'user11'),
+(35, 'accepted', '2022-03-19 00:50:30', 'user8', 'user12'),
+(36, 'accepted', '2022-03-19 02:05:15', 'user9', 'user7'),
+(37, 'accepted', '2022-03-19 03:10:22', 'user9', 'user8'),
+(38, 'accepted', '2022-03-19 04:25:45', 'user9', 'user10'),
+(39, 'accepted', '2022-03-19 05:30:30', 'user9', 'user11'),
+(40, 'accepted', '2022-03-19 06:45:15', 'user9', 'user12'),
+(41, 'accepted', '2022-03-19 07:50:22', 'user10', 'user7'),
+(42, 'accepted', '2022-03-19 08:05:45', 'user10', 'user8'),
+(43, 'accepted', '2022-03-19 09:20:30', 'user10', 'user9'),
+(44, 'accepted', '2022-03-19 10:35:15', 'user10', 'user11'),
+(45, 'accepted', '2022-03-19 11:40:22', 'user10', 'user12'),
+(46, 'accepted', '2022-03-19 12:55:45', 'user11', 'user7'),
+(47, 'accepted', '2022-03-19 14:00:30', 'user11', 'user8'),
+(48, 'accepted', '2022-03-19 15:15:15', 'user11', 'user9'),
+(49, 'accepted', '2022-03-19 16:20:22', 'user11', 'user10'),
+(50, 'accepted', '2022-03-19 17:35:45', 'user11', 'user12'),
+(51, 'accepted', '2022-03-19 16:10:30', 'user12', 'user3'),
+(52, 'rejected', '2022-03-19 17:25:15', 'user12', 'user4'),
+(53, 'pending', '2022-03-19 18:30:22', 'user12', 'user5'),
+(54, 'rejected', '2022-03-19 19:45:45', 'user12', 'user6'),
+(55, 'pending', '2022-03-19 20:50:30', 'user9', 'user7'),
+(56, 'rejected', '2022-03-19 21:05:15', 'user9', 'user1'),
+(57, 'accepted', '2022-03-19 17:25:15', 'user12', 'user7'),
+(58, 'accepted', '2022-03-19 18:30:22', 'user12', 'user8'),
+(59, 'accepted', '2022-03-19 19:45:45', 'user12', 'user9'),
+(60, 'accepted', '2022-03-19 20:50:30', 'user12', 'user10'),
+(61, 'accepted', '2022-03-19 21:05:15', 'user12', 'user11'),
+(62, 'accepted', '2022-03-19 22:20:22', 'user24', 'user25'),
+(63, 'accepted', '2022-03-19 23:35:45', 'user24', 'user26'),
+(64, 'accepted', '2022-03-20 00:40:30', 'user24', 'user27'),
+(65, 'accepted', '2022-03-20 01:35:15', 'user25', 'user24'),
+(66, 'accepted', '2022-03-20 01:15:55', 'user25', 'user26'),
+(67, 'accepted', '2022-03-20 01:25:25', 'user25', 'user27'),
+(68, 'accepted', '2022-03-20 01:35:45', 'user25', 'user28'),
+(69, 'pending', '2022-03-20 01:15:45', 'user25', 'user3'),
+(70, 'pending', '2022-03-20 01:25:45', 'user25', 'user2'),
+(71, 'pending', '2022-03-20 01:55:45', 'user25', 'user1');
+
+# Create post tables to track user generated feeds 
+CREATE TABLE post (
+    post_id INT,
+    content TEXT NOT NULL,
+    create_time TIMESTAMP NOT NULL,
+    user_id VARCHAR(12),
+    PRIMARY KEY (post_id),
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id)
+);
+
+# Create corresponding data per post 
+INSERT INTO post (post_id, content, create_time, user_id) VALUES
+(1, 'Excited to announce our new project!', '2022-03-17 08:30:00', 'user1'),
+(2, 'Just finished a productive meeting.', '2022-03-17 10:45:00', 'user2'),
+(3, 'Looking for new team members!', '2022-03-17 12:20:00', 'user22'),
+(4, 'Celebrating our company anniversary!', '2022-03-18 09:00:00', 'user4'),
+(5, 'Feeling inspired after a conference.', '2022-03-18 11:30:00', 'user1'),
+(6, 'Excited to share our latest product update.', '2022-03-18 14:15:00', 'user1'),
+(7, 'Just launched our new website!', '2022-03-19 08:45:00', 'user7'),
+(8, 'Reflecting on the past year.', '2022-03-19 10:20:00', 'user8'),
+(9, 'Thankful for our amazing team.', '2022-03-19 13:00:00', 'user9'),
+(10, 'Ready for the weekend!', '2022-03-19 15:45:00', 'user11'),
+(11, 'Sharing some industry insights.', '2022-03-20 09:30:00', 'user11'),
+(12, 'Excited to collaborate with new partners.', '2022-03-20 11:15:00', 'user12'),
+(13, 'Looking forward to our upcoming event.', '2022-03-20 13:40:00', 'user13'),
+(14, 'Celebrating our team achievements!', '2022-03-20 16:00:00', 'user14'),
+(15, 'Ready for a busy week ahead.', '2022-03-21 08:20:00', 'user15'),
+(16, 'Launching our new marketing campaign.', '2022-03-21 10:10:00', 'user16'),
+(17, 'Sharing some tips for productivity.', '2022-03-21 12:30:00', 'user17'),
+(18, 'Looking for feedback on our latest project.', '2022-03-21 15:00:00', 'user1'),
+(19, 'Excited to welcome our new team members!', '2022-03-22 09:15:00', 'user15'),
+(20, 'Reflecting on our company values.', '2022-03-22 11:40:00', 'user20'),
+(21, 'Celebrating another successful quarter.', '2022-03-22 14:20:00', 'user21'),
+(22, 'Sharing some exciting news!', '2022-03-22 16:45:00', 'user22'),
+(23, 'Ready for some weekend relaxation.', '2022-03-23 08:00:00', 'user12'),
+(24, 'Looking for recommendations for our next project.', '2022-03-23 10:30:00', 'user24'),
+(25, 'Celebrating our team diversity!', '2022-03-23 12:50:00', 'user25'),
+(26, 'Excited to launch our new product line.', '2022-03-23 15:15:00', 'user26'),
+(27, 'Reflecting on our company culture.', '2022-03-24 09:10:00', 'user27'),
+(28, 'Ready for some team bonding activities!', '2022-03-24 11:20:00', 'user28'),
+(29, 'Sharing some insights from our recent conference.', '2022-03-24 13:40:00', 'user21'),
+(30, 'Excited for our upcoming projects!', '2022-03-24 16:00:00', 'user30');
+
+# Create comments table attached to post_id & user_id 
+CREATE TABLE comment (
+    comment_id INT,
+    content TEXT NOT NULL,
+    create_time TIMESTAMP NOT NULL,
+    post_id INT,
+    user_id VARCHAR(12),
+    PRIMARY KEY (comment_id),
+    FOREIGN KEY (post_id) REFERENCES post(post_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id)
+);
+
+# Create corresponding content for comments posted 
+INSERT INTO comment (comment_id, content, create_time, post_id, user_id)
+VALUES
+(1, 'Great post!', '2022-03-17 10:15:30', 1, 'user1'),
+(2, 'Interesting topic!', '2022-03-17 11:20:45', 1, 'user2'),
+(3, 'I agree with your points.', '2022-03-17 12:25:10', 1, 'user3'),
+(4, 'Well written!', '2022-03-17 13:30:20', 2, 'user3'),
+(5, 'Thanks for sharing.', '2022-03-17 14:35:40', 2, 'user5'),
+(6, 'Looking forward to more posts from you.', '2022-03-17 15:40:55', 3, 'user6'),
+(7, 'This is helpful information.', '2022-03-17 16:45:10', 3, 'user7'),
+(8, 'I learned something new.', '2022-03-17 17:50:25', 3, 'user8'),
+(9, 'Interesting discussion.', '2022-03-17 18:55:30', 4, 'user9'),
+(10, 'Can you provide more details?', '2022-03-17 19:05:45', 4, 'user10'),
+(11, 'Great insights!', '2022-03-17 20:10:50', 5, 'user11'),
+(12, 'I have a question.', '2022-03-17 21:15:05', 5, 'user12'),
+(13, 'This helped me solve a problem.', '2022-03-17 22:20:20', 6, 'user11'),
+(14, 'I had a similar experience.', '2022-03-17 23:25:35', 6, 'user14'),
+(15, 'Thank you!', '2022-03-18 00:30:40', 7, 'user15'),
+(16, 'Interesting perspective.', '2022-03-18 01:35:55', 7, 'user16'),
+(17, 'I found this very informative.', '2022-03-18 02:40:10', 7, 'user17'),
+(18, 'Looking forward to more discussions.', '2022-03-18 03:45:25', 8, 'user21'),
+(19, 'Keep up the good work!', '2022-03-18 04:50:30', 8, 'user19'),
+(20, 'This is valuable.', '2022-03-18 05:55:45', 9, 'user20'),
+(21, 'I enjoyed reading this.', '2022-03-18 06:00:50', 9, 'user21'),
+(22, 'Can you elaborate?', '2022-03-18 07:05:05', 10, 'user22'),
+(23, 'I have a different perspective.', '2022-03-18 08:10:20', 10, 'user22'),
+(24, 'Interesting point.', '2022-03-18 09:15:35', 11, 'user24'),
+(25, 'I disagree with this.', '2022-03-18 10:20:40', 11, 'user25'),
+(26, 'I have similar thoughts.', '2022-03-18 11:25:55', 12, 'user26'),
+(27, 'Great contribution.', '2022-03-18 12:30:10', 12, 'user27'),
+(28, 'This is thought-provoking.', '2022-03-18 13:35:25', 12, 'user28'),
+(29, 'I have a question about this.', '2022-03-18 14:40:30', 13, 'user29'),
+(30, 'This is well-explained.', '2022-03-18 15:45:45', 13, 'user28'),
+(31, 'This is an interesting perspective.', '2022-03-18 16:50:50', 19, 'user1'),
+(32, 'Great insights shared here.', '2022-03-18 17:55:05', 1, 'user2'),
+(33, 'I appreciate the detailed explanation.', '2022-03-18 19:00:20', 14, 'user3'),
+(34, 'Could you provide more examples?', '2022-03-18 20:05:35', 15, 'user4'),
+(35, 'This topic needs further exploration.', '2022-03-18 21:10:40', 25, 'user5'),
+(36, 'I found this article very helpful.', '2022-03-18 22:15:55', 16, 'user6'),
+(37, 'This has given me some new ideas.', '2022-03-18 23:20:10', 16, 'user7'),
+(38, 'I disagree with some points discussed.', '2022-03-18 23:25:25', 23, 'user8'),
+(39, 'Great job on presenting this information.', '2022-03-19 00:30:30', 17, 'user9'),
+(40, 'I have some questions about this.', '2022-03-19 01:35:45', 13, 'user10'),
+(41, 'This was an eye-opening read.', '2022-03-19 02:40:50', 23, 'user11'),
+(42, 'I wish there were more details provided.', '2022-03-19 03:46:05', 18, 'user12'),
+(43, 'I found this quite intriguing.', '2022-03-19 04:51:20', 18, 'user13'),
+(44, 'I appreciate the effort put into this.', '2022-03-19 05:56:35', 11, 'user14'),
+(45, 'I have a different perspective on this.', '2022-03-19 06:01:40', 22, 'user15');
+
+# Create skills table attached to specific skill_id 
+   CREATE TABLE skill (
+    skill_id INT AUTO_INCREMENT PRIMARY KEY,
+    skill_name VARCHAR(100) NOT NULL
+);
+
+# Insert possible professional skills (temporary list which can be later uploaded based on new skills requests which surface on the platform)
+INSERT INTO skill (skill_id, skill_name) VALUES
+  (1, 'Programming'),
+  (2, 'Data Analysis'),
+  (3, 'Machine Learning'),
+  (4, 'Web Development'),
+  (5, 'Graphic Design'),
+  (6, 'Database Management'),
+  (7, 'Project Management'),
+  (8, 'Network Security'),
+  (9, 'Mobile App Development'),
+  (10, 'UI/UX Design'),
+  (11, 'Cloud Computing'),
+  (12, 'Content Writing'),
+  (13, 'Digital Marketing'),
+  (14, 'Financial Analysis'),
+  (15, 'System Administration'),
+  (16, 'Python'),
+  (17, 'Cybersecurity'),
+  (18, 'Artificial Intelligence'),
+  (19, 'Salesforce Administration'),
+  (20, 'DevOps'),
+  (21, 'Photography'),
+  (22, 'R'),
+  (23, 'Java'),
+  (24, 'Animation'),
+  (25, 'Human Resources'),
+  (26, 'Blockchain Development'),
+  (27, 'Quality Assurance'),
+  (28, 'Content Strategy'),
+  (29, 'Video Editing'),
+  (30, 'E-commerce Management'),
+  (31, 'Public Relations'),
+  (32, 'Data Visualization'),
+  (33, 'Technical Support'),
+  (34, 'Social Media Marketing'),
+  (35, 'Product Management'),
+  (36, 'UI Design'),
+  (37, 'Backend Development'),
+  (38, 'Event Planning'),
+  (39, 'Risk Management'),
+  (40, 'Customer Service'),
+  (41, 'Frontend Development'),
+  (42, 'Git'),
+  (43, 'Data Engineering'),
+  (44, 'Market Research'),
+  (45, 'Technical Writing'),
+  (46, 'Search Engine Marketing'),
+  (47, 'SQL'),
+  (48, 'Statistical Analysis'),
+  (49, 'Business Analysis'),
+  (50, 'Content Marketing');
+
+
+# Create company table 
+CREATE TABLE company (
+    company_id VARCHAR(12),
+    company_name VARCHAR(100) NOT NULL,
+    company_web VARCHAR(255),
+    company_about TEXT,
+    company_size VARCHAR(50),
+    industry ENUM 
+        ('Information Technology',
+         'Healthcare','Finance','Manufacturing','Retail',
+         'Education','Hospitality','Transportation','Energy','Government'),
+    PRIMARY KEY (company_id)
+);
+
+# Insert example company websites with company web and stats  
+INSERT INTO company (company_id, company_name, company_web, company_about, company_size, industry) VALUES
+('C1', 'FinTech Solutions', 'www.fintechsolutions.com', 'Innovating the future of financial services.', '100-500', 'Finance'),
+('C2', 'EcoGoods Retail', 'www.ecogoods.com', 'Sustainable retail solutions for a greener planet.', '200-700', 'Retail'),
+('C3', 'CloudNet Systems', 'www.cloudnetsystems.com', 'Cloud computing services for modern businesses.', '500-1500', 'Information Technology'),
+('C4', 'Quantum Mechanics', 'www.quantummechanics.com', 'Advancing technology through quantum computing.', '100-500', 'Information Technology'),
+('C5', 'BrightEducation', 'www.brighteducation.com', 'Fostering learning and growth in education sector.', '200-800', 'Education'),
+('C038', 'Green Transport Corp', 'www.greentransport.com', 'Eco-friendly transportation solutions.', '300-900', 'Transportation'),
+('C6', 'HealthyEats Foods', 'www.healthyeats.com', 'Promoting health through organic food products.', '100-300', 'Hospitality'),
+('C7', 'NextGen Robotics', 'www.nextgenrobotics.com', 'Robotics and AI for the future.', '500-2000', 'Manufacturing'),
+('C8', 'SunPower Energy', 'www.sunpowerenergy.com', 'Renewable energy solutions for a better tomorrow.', '400-1200', 'Energy'),
+('C9', 'GlobalGov Services', 'www.globalgovservices.com', 'Providing government services for the digital age.', '1000-5000', 'Government');
+
+# Create user skill table to connect skills to the user  
+CREATE TABLE user_skill (
+    user_id VARCHAR(12),
+    skill_id INT,
+    PRIMARY KEY (user_id, skill_id),
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id),
+    FOREIGN KEY (skill_id) REFERENCES skill(skill_id)
+);
+
+# Insert data into the user skill table to connect skill ids to the user 
+INSERT INTO user_skill (user_id, skill_id) VALUES
+('user1', 4), ('user1', 10), ('user1', 20), ('user1', 30),
+('user2', 5), ('user2', 14), ('user2', 21), ('user2', 31),
+('user3', 6), ('user3', 18), ('user3', 22), ('user3', 32),
+('user4', 7), ('user4', 22), ('user4', 23), ('user4', 33),
+('user5', 8), ('user5', 26), ('user5', 24), ('user5', 34),
+('user6', 9), ('user6', 30), ('user6', 25), ('user6', 35),
+('user7', 10), ('user7', 34), ('user7', 26), ('user7', 36),
+('user8', 11), ('user8', 38), ('user8', 27), ('user8', 37),
+('user9', 12), ('user9', 42), ('user9', 28), ('user9', 38),
+('user10', 13), ('user10', 46), ('user10', 29), ('user10', 39),
+('user11', 14), ('user11', 50), ('user11', 30), ('user11', 40),
+('user12', 15), ('user12', 3), ('user12', 31), ('user12', 41),
+('user13', 16), ('user13', 7), ('user13', 32), ('user13', 42),
+('user14', 17), ('user14', 11), ('user14', 33), ('user14', 43),
+('user15', 18), ('user15', 15), ('user15', 34), ('user15', 44),
+('user16', 19), ('user16', 2), ('user16', 35), ('user16', 45), 
+('user17', 20), ('user17', 23), ('user17', 36), ('user17', 46),
+('user18', 21), ('user18', 27), ('user18', 37), ('user18', 47),
+('user19', 22), ('user19', 31), ('user19', 38), ('user19', 48),
+('user20', 23), ('user20', 35), ('user20', 39), ('user20', 49),
+('user21', 24), ('user21', 39), ('user21', 40), ('user21', 50),
+('user22', 25), ('user22', 43), ('user22', 41), ('user22', 1),
+('user23', 26), ('user23', 47), ('user23', 42), ('user23', 2),
+('user24', 27), ('user24', 1), ('user24', 43), ('user24', 3),
+('user25', 28), ('user25', 5), ('user25', 44), ('user25', 4),
+('user26', 29), ('user26', 9), ('user26', 45), ('user26', 5),
+('user27', 30), ('user27', 13), ('user27', 46), ('user27', 6),
+('user28', 31), ('user28', 17), ('user28', 47), ('user28', 7),
+('user29', 32), ('user29', 21), ('user29', 48), ('user29', 8),
+('user30', 33), ('user30', 25), ('user30', 49), ('user30', 9);
+
+# Create experience table to retrace professional user experience (to be stored on their profile) 
+CREATE TABLE experience (
+    experience_id INT,
+    role_name VARCHAR(100) NOT NULL,
+    employment_type ENUM 
+        ('Full-time',
+         'Healthcare','Part-time','Contract', 'Freelance'),
+    start_date DATE NOT NULL,
+    end_date DATE,
+    location VARCHAR(100) NOT NULL,
+    is_current_role BOOLEAN NOT NULL,
+    industry ENUM 
+        ('Information Technology',
+         'Healthcare','Finance','Manufacturing','Retail',
+         'Education','Hospitality','Transportation','Energy','Government'),
+    user_id VARCHAR(12),
+    company_id VARCHAR(12),
+    PRIMARY KEY (experience_id),
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id),
+    FOREIGN KEY (company_id) REFERENCES company(company_id)
+);
+
+# Insert data into the experience table with experience and professional details surrounding the experience
+INSERT INTO experience (experience_id, role_name, employment_type, start_date, end_date, location, is_current_role, industry, user_id, company_id) VALUES
+(1, 'Lead Developer', 'Full-time', '2019-01-01', NULL, 'New York', TRUE, 'Information Technology', 'user1', 'C1'),
+(2, 'Marketing Director', 'Part-time', '2018-05-01', '2020-12-31', 'Los Angeles', FALSE, 'Retail', 'user2', 'C2'),
+(3, 'Data Scientist', 'Full-time', '2020-02-01', NULL, 'Chicago', TRUE, 'Information Technology', 'user3', 'C3'),
+(4, 'Financial Analyst', 'Full-time', '2018-09-01', '2021-05-31', 'Boston', FALSE, 'Finance', 'user4', 'C4'),
+(5, 'Senior UX Designer', 'Contract', '2021-01-15', NULL, 'San Francisco', TRUE, 'Information Technology', 'user5', 'C5'),
+(6, 'Operations Manager', 'Full-time', '2019-05-01', NULL, 'Austin', TRUE, 'Information Technology', 'user6', 'C6'),
+(7, 'HR Specialist', 'Part-time', '2020-03-01', NULL, 'Dallas', TRUE, 'Healthcare', 'user7', 'C7'),
+(8, 'Software Engineer', 'Full-time', '2018-07-01', '2022-01-31', 'Seattle', FALSE, 'Information Technology', 'user8', 'C8'),
+(9, 'Project Coordinator', 'Full-time', '2021-06-01', NULL, 'Denver', TRUE, 'Education', 'user9', 'C9'),
+(10, 'Network Administrator', 'Full-time', '2019-11-01', NULL, 'Miami', TRUE, 'Information Technology', 'user10', 'C1'),
+(11, 'Graphic Designer', 'Freelance', '2019-08-01', NULL, 'New York', TRUE, 'Retail', 'user11', 'C2'),
+(12, 'Quality Assurance Engineer', 'Full-time', '2018-06-15', '2021-04-30', 'San Jose', FALSE, 'Information Technology', 'user12', 'C3'),
+(13, 'Content Strategist', 'Part-time', '2020-01-10', NULL, 'Philadelphia', TRUE, 'Education', 'user13', 'C4'),
+(14, 'Product Manager', 'Full-time', '2017-11-01', NULL, 'San Diego', TRUE, 'Information Technology', 'user14', 'C5'),
+(15, 'Sales Executive', 'Full-time', '2019-04-01', '2022-02-28', 'Houston', FALSE, 'Retail', 'user15', 'C6'),
+(16, 'Civil Engineer', 'Contract', '2021-03-01', NULL, 'Phoenix', TRUE, 'Government', 'user16', 'C7'),
+(17, 'Business Analyst', 'Full-time', '2018-05-01', NULL, 'Charlotte', TRUE, 'Finance', 'user17', 'C8'),
+(18, 'IT Support Specialist', 'Part-time', '2019-09-01', '2021-12-31', 'Indianapolis', FALSE, 'Information Technology', 'user18', 'C9'),
+(19, 'Digital Marketing Manager', 'Full-time', '2020-07-01', NULL, 'Atlanta', TRUE, 'Retail', 'user19', 'C1'),
+(20, 'Biomedical Engineer', 'Full-time', '2018-03-01', '2021-08-30', 'Orlando', FALSE, 'Healthcare', 'user20', 'C2'),
+(21, 'Event Planner', 'Contract', '2021-02-01', NULL, 'Las Vegas', TRUE, 'Hospitality', 'user21', 'C3'),
+(22, 'SEO Specialist', 'Full-time', '2017-12-01', NULL, 'Portland', TRUE, 'Retail', 'user22', 'C4'),
+(23, 'Logistics Coordinator', 'Part-time', '2018-04-01', '2021-03-31', 'St. Louis', FALSE, 'Transportation', 'user23', 'C5'),
+(24, 'Web Developer', 'Full-time', '2020-05-01', NULL, 'Baltimore', TRUE, 'Information Technology', 'user24', 'C6'),
+(25, 'Architectural Designer', 'Contract', '2019-02-01', '2022-01-15', 'Kansas City', FALSE, 'Government', 'user25', 'C7'),
+(26, 'Pharmaceutical Sales Rep', 'Full-time', '2018-01-15', NULL, 'Sacramento', TRUE, 'Healthcare', 'user26', 'C8'),
+(27, 'Industrial Designer', 'Full-time', '2019-06-01', '2021-11-30', 'Columbus', FALSE, 'Manufacturing', 'user27', 'C9'),
+(28, 'Accountant', 'Part-time', '2020-08-01', NULL, 'Fort Worth', TRUE, 'Finance', 'user28', 'C1'),
+(29, 'Copywriter', 'Freelance', '2019-03-01', NULL, 'Detroit', TRUE, 'Retail', 'user29', 'C2'),
+(30, 'Market Research Analyst', 'Full-time', '2017-09-01', '2021-07-31', 'Milwaukee', FALSE, 'Retail', 'user30', 'C3');
+
+
+# Create table about connected skills linked to user's experiences
+CREATE TABLE experience_skill (
+    experience_id INT,
+    skill_id INT,
+    PRIMARY KEY (experience_id, skill_id),
+    FOREIGN KEY (experience_id) REFERENCES experience(experience_id),
+    FOREIGN KEY (skill_id) REFERENCES skill(skill_id)
+);
+
+# Insert data into experience skill table to connect specific skills back to experience types (specific taxonomy) 
+INSERT INTO experience_skill (experience_id, skill_id) VALUES
+(1, 1), (1, 4), (1, 16), (1, 37),  -- Skills related to Lead Developer
+(2, 13), (2, 28), (2, 31), (2, 34),  -- Skills related to Marketing Director
+(3, 2), (3, 3), (3, 18), (3, 32),  -- Skills related to Data Scientist
+(4, 14), (4, 19), (4, 49), (4, 48),  -- Skills related to Financial Analyst
+(5, 10), (5, 36), (5, 4), (5, 24),  -- Skills related to Senior UX Designer
+(6, 7), (6, 35), (6, 40), (6, 39),  -- Skills related to Operations Manager
+(7, 25), (7, 21), (7, 31), (7, 13),  -- Skills related to HR Specialist
+(8, 1), (8, 47), (8, 23), (8, 6),  -- Skills related to Software Engineer
+(9, 7), (9, 34), (9, 44), (9, 28),  -- Skills related to Project Coordinator
+(10, 8), (10, 6), (10, 42), (10, 1),  -- Skills related to Network Administrator
+(11, 5), (11, 24), (11, 29), (11, 10),  -- Skills related to Graphic Designer
+(12, 27), (12, 2), (12, 48), (12, 17),  -- Skills related to Quality Assurance Engineer
+(13, 28), (13, 12), (13, 13), (13, 45),  -- Skills related to Content Strategist
+(14, 35), (14, 7), (14, 34), (14, 40),  -- Skills related to Product Manager
+(15, 13), (15, 49), (15, 46), (15, 30),  -- Skills related to Sales Executive
+(16, 37), (16, 1), (16, 23), (16, 48),  -- Skills related to Civil Engineer
+(17, 49), (17, 20), (17, 14), (17, 39),  -- Skills related to Business Analyst
+(18, 33), (18, 47), (18, 6), (18, 16),  -- Skills related to IT Support Specialist
+(19, 13), (19, 46), (19, 34), (19, 12),  -- Skills related to Digital Marketing Manager
+(20, 26), (20, 14), (20, 5), (20, 50),  -- Skills related to Biomedical Engineer
+(21, 38), (21, 34), (21, 39), (21, 28),  -- Skills related to Event Planner
+(22, 13), (22, 46), (22, 12), (22, 34),  -- Skills related to SEO Specialist
+(23, 39), (23, 40), (23, 7), (23, 41),  -- Skills related to Logistics Coordinator
+(24, 4), (24, 41), (24, 47), (24, 1),  -- Skills related to Web Developer
+(25, 5), (25, 29), (25, 24), (25, 10),  -- Skills related to Architectural Designer
+(26, 13), (26, 30), (26, 31), (26, 49),  -- Skills related to Pharmaceutical Sales Rep
+(27, 26), (27, 27), (27, 5), (27, 44),  -- Skills related to Industrial Designer
+(28, 14), (28, 49), (28, 48), (28, 47),  -- Skills related to Accountant
+(29, 12), (29, 45), (29, 28), (29, 50),  -- Skills related to Copywriter
+(30, 44), (30, 34), (30, 13), (30, 12); -- Skills related to Market Research Analyst
+
+
+# Create job postings table 
+CREATE TABLE job (
+    job_id INT,
+    about TEXT NOT NULL,
+    post_date DATE,
+    application_link VARCHAR(255),
+    company_id VARCHAR(12),
+    role_type VARCHAR(50),  
+    PRIMARY KEY (job_id),
+    FOREIGN KEY (company_id) REFERENCES company(company_id)
+);
+
+# Insert data for job postings connected to the company (released by a company profile) 
+INSERT INTO job (job_id, about, post_date, application_link, company_id, role_type) VALUES
+(1, 'Looking for an Experienced Java Developer', '2024-01-01', 'www.joblink1.com', 'C1', 'Lead Developer'),
+(2, 'Hiring a Senior Marketing Strategist', '2024-01-03', 'www.joblink2.com', 'C2', 'Marketing Director'),
+(3, 'Seeking a Project Manager with IT Background', '2024-01-05', 'www.joblink3.com', 'C3', 'Data Scientist'),
+(4, 'Data Analyst Position - Big Data Focus', '2024-01-07', 'www.joblink4.com', 'C4', 'Financial Analyst'),
+(5, 'Front-End Web Developer Opportunity', '2024-01-09', 'www.joblink5.com', 'C5', 'Senior UX Designer'),
+(6, 'Healthcare Administrator Wanted', '2024-01-11', 'www.joblink6.com', 'C6', 'Operations Manager'),
+(7, 'Graphic Designer for Marketing Team', '2024-01-13', 'www.joblink7.com', 'C7', 'HR Specialist'),
+(8, 'Cloud Computing Specialist Required', '2024-01-15', 'www.joblink8.com', 'C8', 'Software Engineer'),
+(9, 'Sales Manager with Tech Industry Experience', '2024-01-17', 'www.joblink9.com', 'C9', 'Project Coordinator'),
+(10, 'Cybersecurity Expert Needed', '2024-01-19', 'www.joblink10.com', 'C1', 'Network Administrator'),
+(11, 'AI Researcher Opening', '2024-01-21', 'www.joblink11.com', 'C2', 'Graphic Designer'),
+(12, 'Mobile App Developer – Android and iOS', '2024-01-23', 'www.joblink12.com', 'C3', 'Quality Assurance Engineer'),
+(13, 'Quality Assurance Engineer for Software Testing', '2024-01-25', 'www.joblink13.com', 'C4', 'Content Strategist'),
+(14, 'HR Manager with Tech Company Experience', '2024-01-27', 'www.joblink14.com', 'C5', 'Product Manager'),
+(15, 'Experienced Financial Analyst', '2024-01-29', 'www.joblink15.com', 'C6', 'Sales Executive'),
+(16, 'Senior Network Engineer Role', '2024-01-31', 'www.joblink16.com', 'C7', 'Civil Engineer'),
+(17, 'Digital Marketing Manager Position', '2024-02-02', 'www.joblink17.com', 'C8', 'Business Analyst'),
+(18, 'Renewable Energy Engineer', '2024-02-04', 'www.joblink18.com', 'C9', 'IT Support Specialist'),
+(19, 'Supply Chain Manager with Manufacturing Experience', '2024-02-06', 'www.joblink19.com', 'C1', 'Digital Marketing Manager'),
+(20, 'E-commerce Specialist Required', '2024-02-08', 'www.joblink20.com', 'C2', 'Biomedical Engineer'),
+(21, 'Content Creator and Social Media Manager', '2024-02-10', 'www.joblink21.com', 'C3', 'Event Planner'),
+(22, 'Logistics Coordinator for Transportation Company', '2024-02-12', 'www.joblink22.com', 'C4', 'SEO Specialist'),
+(23, 'Senior UX/UI Designer', '2024-02-14', 'www.joblink23.com', 'C5', 'Logistics Coordinator'),
+(24, 'Blockchain Developer Wanted', '2024-02-16', 'www.joblink24.com', 'C6', 'Web Developer'),
+(25, 'Event Planner for Corporate Events', '2024-02-18', 'www.joblink25.com', 'C7', 'Architectural Designer'),
+(26, 'Retail Store Manager', '2024-02-20', 'www.joblink26.com', 'C8', 'Pharmaceutical Sales Rep'),
+(27, 'Construction Project Manager', '2024-02-22', 'www.joblink27.com', 'C9', 'Industrial Designer'),
+(28, 'Electrical Engineer for Energy Company', '2024-02-24', 'www.joblink28.com', 'C1', 'Accountant'),
+(29, 'DevOps Engineer', '2024-02-26', 'www.joblink29.com', 'C2', 'Copywriter'),
+(30, 'Product Manager in Tech Industry', '2024-02-28', 'www.joblink30.com', 'C3', 'Market Research Analyst');
+
+# Create table to keep track of user applications to job openings
+CREATE TABLE user_apply (
+    user_id VARCHAR(12),
+    job_id INT,
+    application_time TIMESTAMP NOT NULL,
+    PRIMARY KEY (user_id, job_id),
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id),
+    FOREIGN KEY (job_id) REFERENCES job(job_id)
+);
+
+# Insert data into user applications table 
+INSERT INTO user_apply (user_id, job_id, application_time) VALUES
+('user3', 1, '2024-02-03 09:00:00'),
+('user4', 2, '2024-02-04 09:00:00'),
+('user5', 3, '2024-02-05 09:00:00'),
+('user6', 4, '2024-02-06 09:00:00'),
+('user7', 5, '2024-02-07 09:00:00'),
+('user8', 6, '2024-02-08 09:00:00'),
+('user9', 7, '2024-02-09 09:00:00'),
+('user10', 8, '2024-02-10 09:00:00'),
+('user11', 9, '2024-02-11 09:00:00'),
+('user12', 10, '2024-02-12 09:00:00'),
+('user13', 11, '2024-02-13 09:00:00'),
+('user14', 12, '2024-02-14 09:00:00'),
+('user15', 13, '2024-02-15 09:00:00'),
+('user16', 14, '2024-02-16 09:00:00'),
+('user17', 15, '2024-02-17 09:00:00'),
+('user18', 16, '2024-02-18 09:00:00'),
+('user19', 17, '2024-02-19 09:00:00'),
+('user20', 18, '2024-02-20 09:00:00'),
+('user21', 19, '2024-02-21 09:00:00'),
+('user22', 20, '2024-02-22 09:00:00'),
+('user23', 21, '2024-02-23 09:00:00'),
+('user24', 22, '2024-02-24 09:00:00'),
+('user25', 23, '2024-02-25 09:00:00'),
+('user26', 24, '2024-02-26 09:00:00'),
+('user27', 25, '2024-02-27 09:00:00'),
+('user28', 26, '2024-02-28 09:00:00'),
+('user29', 27, '2024-03-01 09:00:00'),
+('user30', 28, '2024-03-02 09:00:00'),
+('user1', 29, '2024-03-03 09:00:00'),
+('user2', 30, '2024-03-04 09:00:00');
+
+# Create required skills for job postings table 
+CREATE TABLE job_skill (
+    job_id INT,
+    skill_id INT,
+    PRIMARY KEY (job_id, skill_id),
+    FOREIGN KEY (job_id) REFERENCES job(job_id),
+    FOREIGN KEY (skill_id) REFERENCES skill(skill_id)
+);
+
+# Insert data to connect job postings to bank of skills 
+INSERT INTO job_skill (job_id, skill_id) VALUES
+(3, 5), (3, 6),
+(4, 7), (4, 8),
+(5, 9), (5, 10),
+(6, 11), (6, 12),
+(7, 13), (7, 14),
+(8, 15), (8, 16),
+(9, 17), (9, 18),
+(10, 19), (10, 20),
+(11, 21), (11, 22),
+(12, 23), (12, 24),
+(13, 25), (13, 26),
+(14, 27), (14, 28),
+(15, 29), (15, 30),
+(16, 31), (16, 32),
+(17, 33), (17, 34),
+(18, 35), (18, 36),
+(19, 37), (19, 38),
+(20, 39), (20, 40),
+(21, 41), (21, 42),
+(22, 43), (22, 44),
+(23, 45), (23, 46),
+(24, 47), (24, 48),
+(25, 49), (25, 50),
+(26, 1), (26, 2),
+(27, 3), (27, 4),
+(28, 5), (28, 6),
+(29, 7), (29, 8),
+(30, 9), (30, 10);
+
+# Create school table (to be connected to the user's profile) 
+CREATE TABLE school (
+    school_id INT,
+    school_name VARCHAR(100) NOT NULL,
+    school_web VARCHAR(255),
+    location VARCHAR(100) NOT NULL,
+    PRIMARY KEY (school_id)
+);
+
+# Insert example schools which users could have attended to (database can be uploaded extemporaneously as new schools surface) 
+INSERT INTO school (school_id, school_name, school_web, location) VALUES
+(1, 'Global Business School', 'www.globalbusiness.edu', 'London'),
+(2, 'National Institute of Technology', 'www.nit.edu', 'Tokyo'),
+(3, 'Pacific Science University', 'www.pacificscience.edu', 'San Francisco'),
+(4, 'Central Art Academy', 'www.centralart.academy', 'Paris'),
+(5, 'Metropolitan Engineering College', 'www.metroengg.edu', 'New York'),
+(6, 'Southern Humanities Institute', 'www.southernhumanities.edu', 'Melbourne'),
+(7, 'Eastern Medical School', 'www.easternmed.edu', 'Boston'),
+(8, 'Western Law University', 'www.westernlaw.edu', 'Los Angeles'),
+(9, 'Northern Technology Institute', 'www.northerntech.edu', 'Toronto'),
+(10, 'Seaside Business College', 'www.seasidebusiness.edu', 'Miami'),
+(11, 'Skyline Design School', 'www.skylinedesign.edu', 'Seattle'),
+(12, 'Lakeside Arts Academy', 'www.lakesidearts.academy', 'Chicago'),
+(13, 'Green Valley Environmental Studies', 'www.greenvalleyenv.edu', 'Denver'),
+(14, 'Riverbank Music Conservatory', 'www.riverbankmusic.edu', 'New Orleans'),
+(15, 'Sunrise Computer Science Institute', 'www.sunrisecsi.edu', 'Austin'),
+(16, 'Hilltop Economics University', 'www.hilltopecon.edu', 'San Diego'),
+(17, 'Harbor Health Sciences', 'www.harborhealth.edu', 'San Jose'),
+(18, 'Rainforest Agricultural College', 'www.rainforest.agri.edu', 'Kuala Lumpur'),
+(19, 'Desert Architecture Institute', 'www.desertarch.edu', 'Phoenix'),
+(20, 'Oceanography Institute of Technology', 'www.oceanographytech.edu', 'Hawaii'),
+(21, 'Prairie Veterinary School', 'www.prairievetschool.edu', 'Houston'),
+(22, 'Arctic Climate Studies Center', 'www.arcticclimate.edu', 'Reykjavik'),
+(23, 'Tropical Medicine University', 'www.tropicalmedu.edu', 'Bangkok'),
+(24, 'Highland Physics Society', 'www.highlandphysics.edu', 'Edinburgh'),
+(25, 'Canyon Geology College', 'www.canyongeology.edu', 'Las Vegas'),
+(26, 'Forest Ecology Institute', 'www.forestei.edu', 'Portland'),
+(27, 'Plateau Anthropology University', 'www.plateauanthro.edu', 'Santa Fe'),
+(28, 'Volcanic Research School', 'www.volcanicresearch.edu', 'Naples'),
+(29, 'Island Biodiversity Academy', 'www.islandbio.edu', 'Fiji'),
+(30, 'Urban Planning and Development Institute', 'www.urbanplanning.edu', 'Amsterdam');
+
+
+# Create education table 
+CREATE TABLE education (
+    education_id INT,
+    degree VARCHAR(100) NOT NULL,
+    department VARCHAR(100),
+    field_of_study VARCHAR(100),
+    start_date DATE NOT NULL,
+    end_date DATE,
+    is_current BOOLEAN NOT NULL,
+    gpa DECIMAL(3, 2),
+    user_id VARCHAR(12),
+    school_id INT,
+    PRIMARY KEY (education_id),
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id),
+    FOREIGN KEY (school_id) REFERENCES school(school_id)
+);
+
+# Insert data into the education table with corresponding school and specifics of the user degree 
+INSERT INTO education (education_id, degree, department, field_of_study, start_date, end_date, is_current, gpa, user_id, school_id) VALUES
+(1, 'BSc Computer Science', 'Science', 'Computer Science', '2015-09-01', '2019-06-01', FALSE, 3.6, 'user1', 1),
+(2, 'Masters in Graphic Design', 'Arts', 'Design', '2016-09-01', '2018-06-01', FALSE, 3.7, 'user2', 2),
+(3, 'BSc Mathematics', 'Science', 'Mathematics', '2014-09-01', '2018-06-01', FALSE, 3.5, 'user3', 3),
+(4, 'Masters in Environmental Science', 'Science', 'Environmental Science', '2017-09-01', '2019-06-01', FALSE, 3.8, 'user4', 4),
+(5, 'BA in English Literature', 'Arts', 'English', '2013-09-01', '2017-06-01', FALSE, 3.4, 'user5', 5),
+(6, 'MBA', 'Business', 'Business Administration', '2016-09-01', '2018-06-01', FALSE, 3.6, 'user6', 6),
+(7, 'BSc Biology', 'Science', 'Biology', '2015-09-01', '2019-06-01', FALSE, 3.7, 'user7', 7),
+(8, 'PhD in Physics', 'Science', 'Physics', '2014-09-01', '2020-06-01', TRUE, 3.9, 'user8', 8),
+(9, 'BSc Economics', 'Social Science', 'Economics', '2015-09-01', '2019-06-01', FALSE, 3.5, 'user9', 9),
+(10, 'Masters in Sociology', 'Social Science', 'Sociology', '2016-09-01', '2018-06-01', FALSE, 3.6, 'user10', 10),
+(11, 'Bachelor of Architecture', 'Architecture', 'Architecture', '2014-09-01', '2019-06-01', FALSE, 3.4, 'user11', 11),
+(12, 'Master of Fine Arts', 'Arts', 'Fine Arts', '2017-09-01', '2019-06-01', FALSE, 3.8, 'user12', 12),
+(13, 'BSc Mechanical Engineering', 'Engineering', 'Mechanical Engineering', '2016-09-01', '2020-06-01', FALSE, 3.7, 'user13', 13),
+(14, 'MSc Psychology', 'Social Science', 'Psychology', '2015-09-01', '2017-06-01', FALSE, 3.5, 'user14', 14),
+(15, 'Bachelor in International Relations', 'Social Science', 'International Relations', '2014-09-01', '2018-06-01', FALSE, 3.6, 'user15', 15),
+(16, 'BSc Information Systems', 'Information Technology', 'Information Systems', '2013-09-01', '2017-06-01', FALSE, 3.9, 'user16', 16),
+(17, 'MSc Chemical Engineering', 'Engineering', 'Chemical Engineering', '2018-09-01', '2020-06-01', TRUE, 3.4, 'user17', 17),
+(18, 'BA in Communication', 'Arts', 'Communication', '2015-09-01', '2019-06-01', FALSE, 3.6, 'user18', 18),
+(19, 'Masters in Public Health', 'Science', 'Public Health', '2016-09-01', '2018-06-01', FALSE, 3.8, 'user19', 19),
+(20, 'BSc Nursing', 'Healthcare', 'Nursing', '2014-09-01', '2018-06-01', FALSE, 3.7, 'user20', 20),
+(21, 'BSc Marketing', 'Business', 'Marketing', '2013-09-01', '2017-06-01', FALSE, 3.5, 'user21', 21),
+(22, 'LLB Law', 'Law', 'Law', '2015-09-01', '2019-06-01', FALSE, 3.7, 'user22', 22),
+(23, 'PhD in Astrophysics', 'Science', 'Astrophysics', '2014-09-01', '2020-06-01', TRUE, 3.9, 'user23', 23),
+(24, 'Master in Business Analytics', 'Business', 'Business Analytics', '2017-09-01', '2019-06-01', FALSE, 3.8, 'user24', 24),
+(25, 'BSc in Environmental Science', 'Science', 'Environmental Science', '2016-09-01', '2020-06-01', FALSE, 3.4, 'user25', 25),
+(26, 'MSc in Mathematics', 'Science', 'Mathematics', '2015-09-01', '2017-06-01', FALSE, 3.8, 'user26', 26),
+(27, 'Bachelor in Tourism Management', 'Hospitality', 'Tourism Management', '2014-09-01', '2018-06-01', FALSE, 3.6, 'user27', 27),
+(28, 'BSc Physics', 'Science', 'Physics', '2013-09-01', '2017-06-01', FALSE, 3.5, 'user28', 28),
+(29, 'MA in History', 'Arts', 'History', '2015-09-01', '2019-06-01', FALSE, 3.7, 'user29', 29),
+(30, 'BSc Electrical Engineering', 'Engineering', 'Electrical Engineering', '2016-09-01', '2020-06-01', TRUE, 3.8, 'user30', 30);
+
+# Create table about post reactions (social networking feature) 
+CREATE TABLE reaction (
+    reaction_id INT,
+    reaction_type ENUM('like', 'love', 'celebrate', 'insightful', 'curious') NOT NULL,
+    reaction_time TIMESTAMP NOT NULL,
+    user_id VARCHAR(12),
+    post_id INT,
+  	PRIMARY KEY(reaction_id),
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id),
+    FOREIGN KEY (post_id) REFERENCES post(post_id)
+);
+
+# Insert example data of users reacting to posts on the platform 
+INSERT INTO reaction (reaction_id, reaction_type, reaction_time, user_id, post_id) VALUES
+(1, 'like', '2024-03-17 08:00:00', 'user1', 5),
+(2, 'love', '2024-03-17 08:15:00', 'user2', 3),
+(3, 'celebrate', '2024-03-17 08:30:00', 'user3', 10),
+(4, 'insightful', '2024-03-17 08:45:00', 'user4', 8),
+(5, 'curious', '2024-03-17 09:00:00', 'user5', 2),
+(6, 'like', '2024-03-17 09:15:00', 'user6', 4),
+(7, 'love', '2024-03-17 09:30:00', 'user7', 1),
+(8, 'celebrate', '2024-03-17 09:45:00', 'user8', 7),
+(9, 'insightful', '2024-03-17 10:00:00', 'user9', 6),
+(10, 'curious', '2024-03-17 10:15:00', 'user10', 9),
+(11, 'like', '2024-03-17 10:30:00', 'user11', 12),
+(12, 'love', '2024-03-17 10:45:00', 'user12', 11),
+(13, 'celebrate', '2024-03-17 11:00:00', 'user13', 14),
+(14, 'insightful', '2024-03-17 11:15:00', 'user14', 13),
+(15, 'curious', '2024-03-17 11:30:00', 'user15', 16),
+(16, 'like', '2024-03-17 11:45:00', 'user16', 15),
+(17, 'love', '2024-03-17 12:00:00', 'user17', 18),
+(18, 'celebrate', '2024-03-17 12:15:00', 'user18', 17),
+(19, 'insightful', '2024-03-17 12:30:00', 'user19', 20),
+(20, 'curious', '2024-03-17 12:45:00', 'user20', 19),
+(21, 'like', '2024-03-17 13:00:00', 'user21', 22),
+(22, 'love', '2024-03-17 13:15:00', 'user22', 21),
+(23, 'celebrate', '2024-03-17 13:30:00', 'user23', 24),
+(24, 'insightful', '2024-03-17 13:45:00', 'user24', 23),
+(25, 'curious', '2024-03-17 14:00:00', 'user25', 26),
+(26, 'like', '2024-03-17 14:15:00', 'user26', 25),
+(27, 'love', '2024-03-17 14:30:00', 'user27', 28),
+(28, 'celebrate', '2024-03-17 14:45:00', 'user28', 27),
+(29, 'insightful', '2024-03-17 15:00:00', 'user29', 30),
+(30, 'curious', '2024-03-17 15:15:00', 'user30', 29);
+
+# Create table about comment replies from the user 
+CREATE TABLE commentreply (
+    comment_reply_id INT,
+    content TEXT NOT NULL,
+    create_time TIMESTAMP NOT NULL,
+    comment_id INT,
+    user_id VARCHAR(12),
+    PRIMARY KEY (comment_reply_id),
+    FOREIGN KEY (comment_id) REFERENCES comment(comment_id),
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id)
+);
+
+# Insert data into comment replies of users responding to comments on their post
+INSERT INTO commentreply (comment_reply_id, content, create_time, comment_id, user_id) VALUES
+(1, 'Great point!', '2024-03-17 16:00:00', 5, 'user1'),
+(2, 'I agree with this', '2024-03-17 16:05:00', 3, 'user2'),
+(3, 'Interesting perspective', '2024-03-17 16:10:00', 10, 'user3'),
+(4, 'Thanks for sharing', '2024-03-17 16:15:00', 8, 'user4'),
+(5, 'Really insightful', '2024-03-17 16:20:00', 2, 'user5'),
+(6, 'Couldn''t agree more', '2024-03-17 16:25:00', 4, 'user6'),
+(7, 'Well said', '2024-03-17 16:30:00', 1, 'user7'),
+(8, 'Very informative', '2024-03-17 16:35:00', 7, 'user8'),
+(9, 'Absolutely correct', '2024-03-17 16:40:00', 6, 'user9'),
+(10, 'That makes sense', '2024-03-17 16:45:00', 9, 'user10'),
+(11, 'Good observation', '2024-03-17 16:50:00', 12, 'user11'),
+(12, 'I hadn''t thought of that', '2024-03-17 16:55:00', 11, 'user12'),
+(13, 'Completely agree', '2024-03-17 17:00:00', 14, 'user13'),
+(14, 'That''s a good point', '2024-03-17 17:05:00', 13, 'user14'),
+(15, 'Nicely explained', '2024-03-17 17:10:00', 16, 'user15'),
+(16, 'I see your point', '2024-03-17 17:15:00', 15, 'user16'),
+(17, 'Interesting view', '2024-03-17 17:20:00', 18, 'user17'),
+(18, 'That''s true', '2024-03-17 17:25:00', 17, 'user18'),
+(19, 'I concur with this', '2024-03-17 17:30:00', 20, 'user19'),
+(20, 'Spot on', '2024-03-17 17:35:00', 19, 'user20'),
+(21, 'Exactly right', '2024-03-17 17:40:00', 22, 'user21'),
+(22, 'Couldn''t say it better', '2024-03-17 17:45:00', 21, 'user22'),
+(23, 'Agreed', '2024-03-17 17:50:00', 24, 'user23'),
+(24, 'Very true', '2024-03-17 17:55:00', 23, 'user24'),
+(25, 'Makes a lot of sense', '2024-03-17 18:00:00', 26, 'user25'),
+(26, 'Precisely', '2024-03-17 18:05:00', 25, 'user26'),
+(27, 'You''re right', '2024-03-17 18:10:00', 28, 'user27'),
+(28, 'Well put', '2024-03-17 18:15:00', 27, 'user28'),
+(29, 'That''s insightful', '2024-03-17 18:20:00', 30, 'user29'),
+(30, 'Absolutely', '2024-03-17 18:25:00', 29, 'user30'),
+(31, 'I second that', '2024-03-17 18:30:00', 31, 'user1'),
+(32, 'Indeed', '2024-03-17 18:35:00', 32, 'user2'),
+(33, 'Good point made', '2024-03-17 18:40:00', 33, 'user3'),
+(34, 'Well explained', '2024-03-17 18:45:00', 34, 'user4'),
+(35, 'Yes, exactly', '2024-03-17 18:50:00', 35, 'user5'),
+(36, 'Agree completely', '2024-03-17 18:55:00', 36, 'user6'),
+(37, 'I think so too', '2024-03-17 19:00:00', 37, 'user7'),
+(38, 'This is spot on', '2024-03-17 19:05:00', 38, 'user8'),
+(39, 'Absolutely agree', '2024-03-17 19:10:00', 39, 'user9'),
+(40, 'That''s a great take', '2024-03-17 19:15:00', 40, 'user10'),
+(41, 'Couldn''t agree more!', '2024-03-17 19:20:00', 41, 'user11'),
+(42, 'Very well said', '2024-03-17 19:25:00', 42, 'user12'),
+(43, 'Right on point', '2024-03-17 19:30:00', 43, 'user13'),
+(44, 'Exactly my thoughts', '2024-03-17 19:35:00', 44, 'user14'),
+(45, 'That''s an interesting perspective', '2024-03-17 19:40:00', 45, 'user15'),
+(46, 'So true', '2024-03-17 19:45:00', 1, 'user16'),
+(47, 'Couldn''t have said it better', '2024-03-17 19:50:00', 2, 'user17'),
+(48, 'Totally agree', '2024-03-17 19:55:00', 3, 'user18'),
+(49, 'You nailed it', '2024-03-17 20:00:00', 4, 'user19'),
+(50, 'Spot-on observation', '2024-03-17 20:05:00', 5, 'user20'),
+(51, 'I''m with you on this', '2024-03-17 20:10:00', 6, 'user21'),
+(52, 'Exactly!', '2024-03-17 20:15:00', 7, 'user22'),
+(53, 'True words', '2024-03-17 20:20:00', 8, 'user23'),
+(54, 'That''s spot-on', '2024-03-17 20:25:00', 9, 'user24'),
+(55, 'You hit the nail on the head', '2024-03-17 20:30:00', 10, 'user25'),
+(56, 'Couldn''t be more accurate', '2024-03-17 20:35:00', 11, 'user26'),
+(57, 'That''s exactly right', '2024-03-17 20:40:00', 12, 'user27'),
+(58, 'I completely agree', '2024-03-17 20:45:00', 13, 'user28'),
+(59, 'You summed it up perfectly', '2024-03-17 20:50:00', 14, 'user29'),
+(60, 'Well articulated', '2024-03-17 20:55:00', 15, 'user30');
+
+# Create table "open_to" work/hire which users can place on their profile to alert their status to other users
+CREATE TABLE open_to (
+    open_to_id INT PRIMARY KEY,
+    status ENUM('Actively Searching', 'Open to Offers') NOT NULL,
+    role_type VARCHAR(100),
+    user_id VARCHAR(12) NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES userprofile(user_id)
+);
+
+# Insert example data of users either looking to work or hire, to alert their network of their status 
+INSERT INTO open_to (open_to_id, status, role_type, user_id) VALUES
+(1, 'Actively Searching', 'Lead Developer', 'user1'),
+(2, 'Open to Offers', 'Marketing Director', 'user2'),
+(3, 'Actively Searching', 'Data Scientist', 'user3'),
+(4, 'Actively Searching', 'Financial Analyst', 'user4'),
+(5, 'Open to Offers', 'Senior UX Designer', 'user5'),
+(6, 'Actively Searching', 'Operations Manager', 'user6'),
+(7, 'Actively Searching', 'HR Specialist', 'user7'),
+(8, 'Open to Offers', 'Software Engineer', 'user8'),
+(9, 'Actively Searching', 'Project Coordinator', 'user9'),
+(10, 'Actively Searching', 'Network Administrator', 'user10'),
+(11, 'Open to Offers', 'Graphic Designer', 'user11'),
+(12, 'Actively Searching', 'Quality Assurance Engineer', 'user12'),
+(13, 'Actively Searching', 'Content Strategist', 'user13'),
+(14, 'Open to Offers', 'Product Manager', 'user14'),
+(15, 'Actively Searching', 'Sales Executive', 'user15'),
+(16, 'Actively Searching', 'Civil Engineer', 'user16'),
+(17, 'Open to Offers', 'Business Analyst', 'user17'),
+(18, 'Actively Searching', 'IT Support Specialist', 'user18'),
+(19, 'Actively Searching', 'Digital Marketing Manager', 'user19'),
+(20, 'Open to Offers', 'Biomedical Engineer', 'user20'),
+(21, 'Actively Searching', 'Event Planner', 'user21'),
+(22, 'Actively Searching', 'SEO Specialist', 'user22'),
+(23, 'Open to Offers', 'Logistics Coordinator', 'user23'),
+(24, 'Actively Searching', 'Web Developer', 'user24'),
+(25, 'Actively Searching', 'Architectural Designer', 'user25'),
+(26, 'Open to Offers', 'Pharmaceutical Sales Rep', 'user26'),
+(27, 'Actively Searching', 'Industrial Designer', 'user27'),
+(28, 'Actively Searching', 'Accountant', 'user28'),
+(29, 'Open to Offers', 'Copywriter', 'user29'),
+(30, 'Actively Searching', 'Market Research Analyst', 'user30'),
+(31, 'Actively Searching', 'Lead Developer', 'user2'),
+(32, 'Actively Searching', 'Software Engineer', 'user3'),
+(33, 'Open to Offers', 'HR Specialist', 'user4'),
+(34, 'Actively Searching', 'Product Manager', 'user5'),
+(35, 'Open to Offers', 'Digital Marketing Manager', 'user1'),
+(36, 'Actively Searching', 'Web Developer', 'user8'),
+(37, 'Actively Searching', 'Senior UX Designer', 'user1'),
+(38, 'Open to Offers', 'Product Manager', 'user10'),
+(39, 'Open to Offers', 'Industrial Designer', 'user25'),
+(40, 'Open to Offers', 'Biomedical Engineer', 'user7'),
+(41, 'Open to Offers', 'Software Engineer', 'user21'),
+(42, 'Actively Searching', 'Sales Executive', 'user1'),
+(43, 'Open to Offers', 'Software Engineer', 'user13'),
+(44, 'Actively Searching', 'Logistics Coordinator', 'user16'),
+(45, 'Actively Searching', 'Pharmaceutical Sales Rep', 'user11'),
+(46, 'Actively Searching', 'Lead Developer', 'user21'),
+(47, 'Actively Searching', 'Operations Manager', 'user5'),
+(48, 'Actively Searching', 'Accountant', 'user20'),
+(49, 'Actively Searching', 'Sales Executive', 'user14'),
+(50, 'Actively Searching', 'Architectural Designer', 'user7'),
+(51, 'Open to Offers', 'Accountant', 'user22'),
+(52, 'Actively Searching', 'Architectural Designer', 'user4'),
+(53, 'Open to Offers', 'Marketing Director', 'user26'),
+(54, 'Open to Offers', 'Sales Executive', 'user17'),
+(55, 'Actively Searching', 'Architectural Designer', 'user26'),
+(56, 'Open to Offers', 'Content Strategist', 'user24'),
+(57, 'Open to Offers', 'Industrial Designer', 'user11'),
+(58, 'Actively Searching', 'Graphic Designer', 'user9'),
+(59, 'Open to Offers', 'IT Support Specialist', 'user16'),
+(60, 'Actively Searching', 'Data Scientist', 'user23'),
+(61, 'Actively Searching', 'Accountant', 'user9'),
+(62, 'Open to Offers', 'Industrial Designer', 'user11'),
+(63, 'Actively Searching', 'Sales Executive', 'user18'),
+(64, 'Actively Searching', 'Marketing Director', 'user6'),
+(65, 'Actively Searching', 'Architectural Designer', 'user17');
+
+
+
+
