@@ -9,7 +9,7 @@
 ## Overview
 
 In today's business landscape, professional networking platforms like LinkedIn are essential for career advancement and business growth. Our project, LockedIn, aims to create a database-driven platform that caters to the professional networking needs of individuals, streamlining connectivity, job searching, and content sharing. This project emphasizes a simplified, distraction-free user experience by focusing on core functionalities without the clutter often associated with larger platforms.
-![image](https://github.com/user-attachments/assets/9fc67d69-c581-4aea-a551-0711473d4c1a)
+![image](https://github.com/user-attachments/assets/b68f2581-4a35-47ba-b01a-75e882470606)
 
 
 ## Repo Structure
@@ -39,7 +39,7 @@ LockedIn_Database_Design/
 
     - The conceptual model was developed based on the mission objectives of LockedIn, capturing the essential data entities and their relationships. Below is the Entity-Relationship Diagram (ERD) illustrating the conceptual design of the database.
 
-    ![image](https://github.com/user-attachments/assets/f3d16e37-c443-429e-a762-379869f3508b)
+    ![image](https://github.com/user-attachments/assets/c532dd46-01f9-46d3-ab3a-46fa5628d879)
 
 
    </details>
