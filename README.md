@@ -39,7 +39,8 @@ LockedIn_Database_Design/
 
     - The conceptual model was developed based on the mission objectives of LockedIn, capturing the essential data entities and their relationships. Below is the Entity-Relationship Diagram (ERD) illustrating the conceptual design of the database.
 
-    ![ERD](LockedIn_ERD.png)
+    ![image](https://github.com/user-attachments/assets/f3d16e37-c443-429e-a762-379869f3508b)
+
 
    </details>
 
