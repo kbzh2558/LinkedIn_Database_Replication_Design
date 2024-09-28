@@ -16,9 +16,9 @@ In today's business landscape, professional networking platforms like LinkedIn a
 ```
 LockedIn_Database_Design/
 ├── README.md
-├── LockedIn_ERD.png # Entity-Relationship Diagram of the database
-├── LockedIn_Relational_Schema.xlsx # Relational schema with attributes and relationships
-├── SQL_Query_Examples.txt # Examples of SQL queries used for implementation
+├── 4_phase1.pdf                            # summary report
+├── 4_phase2.txt                            # DDL and DML code for implementation and demonstration
+├── 4_phase3.pdf                            # presentation slide
 ```
 
 ### Step-by-step Breakdown
