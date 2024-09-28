@@ -9,7 +9,7 @@
 ## Overview
 
 In today's business landscape, professional networking platforms like LinkedIn are essential for career advancement and business growth. Our project, LockedIn, aims to create a database-driven platform that caters to the professional networking needs of individuals, streamlining connectivity, job searching, and content sharing. This project emphasizes a simplified, distraction-free user experience by focusing on core functionalities without the clutter often associated with larger platforms.
-![image](https://github.com/user-attachments/assets/af371c35-ae20-4ded-9373-328bd0b5fe32)
+![image](https://github.com/user-attachments/assets/9fc67d69-c581-4aea-a551-0711473d4c1a)
 
 
 ## Repo Structure
