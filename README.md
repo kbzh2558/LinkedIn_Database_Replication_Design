@@ -54,7 +54,7 @@ LockedIn_Database_Design/
 4. <details>
     <summary>Physical Implementation and SQL Queries.</summary>
 
-    - The relational schema was implemented using MySQL, with tables physically created and tested on DB Fiddle. The database supports multiple queries categorized by user focus (candidates, companies, and LockedIn management). Sample queries include data retrieval for user profiles, job searches, and interaction tracking.
+    - The relational schema was implemented using MySQL, with tables physically created and tested on DB Fiddle. The database supports multiple queries categorized by user focus (candidates, companies, and LockedIn management). Sample queries include data retrieval for user profiles, job searches, and interaction tracking. The database is physically implemented on `db-fiddle` and can be found [here](https://www.db-fiddle.com/f/gp3nd3ctRAVvGu5Yqts1r4/21).
 
    </details>
 
